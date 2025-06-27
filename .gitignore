@@ -1,0 +1,65 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Environment variables
+.env
+
+# Streamlit cache
+.streamlit/
+*.streamlit/
+
+# VSCode config
+.vscode/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# macOS system files
+.DS_Store
+
+# Test databases or SQLite files
+*.sqlite3
+*.db
+
+# Logs
+logs/
+*.log
+
+# Unit test coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# MyPy & Pyright
+.mypy_cache/
+.pyright/
+
+# pytest
+.pytest_cache/
+
+# ChromaDB persistent storage
+chroma_db/
+test_chroma/
+test_chroma_db/
+
+# Model files (if large or not needed in version control)
+models/saved_models/*
+
+
+# Linting
+pylint-report.txt
+flake8.log

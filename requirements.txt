@@ -1,0 +1,14 @@
+tensorflow
+scikit-learn
+chromadb
+google-generativeai
+opencv-python
+websockets
+pytest
+pytest-asyncio
+python-dotenv
+streamlit
+torch
+transformers
+plotly
+plotly[express]
