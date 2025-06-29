@@ -35,7 +35,7 @@ SESSION_CONFIG = {
 
 MODEL_PATHS = {
     'facial_emotion': MODEL_DIR / "emotion_model.h5",
-    'sarcasm': MODEL_DIR / "best_sarcasm_model.h5",
+    'sarcasm': MODEL_DIR / "model_lstm.pkl",
     'vak': MODEL_DIR / "vak_model"  # Not .pkl
 }
 
