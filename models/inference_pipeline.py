@@ -63,6 +63,11 @@ class MultimodalInferencePipeline:
         Returns:
             Dict containing all model outputs
         """
+        if isinstance(text, list):
+            text = ' '.join(text)
+        
+        logger.debug(f"[Input Text Type] {type(text)} | Value: {text[:50]}")
+
         results = {
             'facial_emotion': {},
             'sarcasm_detected': False,

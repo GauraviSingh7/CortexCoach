@@ -168,47 +168,51 @@ class SarcasmDetectionWrapper(ModelWrapper):
     
     def predict(self, text: str) -> Tuple[bool, float]:
         """Predict sarcasm in text"""
+        # 🚨 Defensive fix: always coerce list inputs into one string
+        if isinstance(text, list):
+            text = " ".join(text)
+
+        # Now ensure model is loaded and text is non-empty
         if not self.is_loaded or not text:
             return False, 0.0
-        
+
         try:
             # Preprocess text
             processed = self.preprocess_text(text)
             if not processed:
                 return False, 0.0
-            
+
             # Make prediction based on model type
             if hasattr(self.model, 'predict_proba'):
                 # Sklearn-like model
                 if 'input_ids' in processed:
                     input_data = processed['input_ids'].numpy().flatten()[:self.max_length]
                 else:
-                    input_data = [text]  # Fallback to raw text
-                
+                    input_data = text  # Use raw text directly
                 probabilities = self.model.predict_proba([input_data])
                 sarcasm_prob = probabilities[0][1] if len(probabilities[0]) > 1 else probabilities[0][0]
-                
+
             elif hasattr(self.model, 'forward'):
                 # PyTorch BERT model
                 with torch.no_grad():
                     outputs = self.model(**processed)
                     probabilities = torch.softmax(outputs.logits, dim=1)
                     sarcasm_prob = probabilities[0][1].item()
-            
+
             else:
                 # Custom model - attempt direct prediction
                 sarcasm_prob = self.model.predict([text])[0]
-            
+
             is_sarcastic = sarcasm_prob > 0.5
             confidence = float(sarcasm_prob)
-            
             self.last_prediction = (is_sarcastic, confidence)
             return is_sarcastic, confidence
-            
+
         except Exception as e:
             logger.error(f"Sarcasm prediction failed: {e}")
             return False, 0.0
-
+        
+        
 class VAKLearningStyleWrapper:
     def __init__(self, model_dir: str):
         self.model_dir = model_dir

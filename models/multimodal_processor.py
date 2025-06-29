@@ -114,6 +114,10 @@ class MultimodalContextProcessor:
             'sarcasm_confidence': 0.0
         }
 
+        # ✅ Convert list of strings to a single string if needed
+        if isinstance(text, list):
+            text = ' '.join(text)
+
         if not text:
             return results
 

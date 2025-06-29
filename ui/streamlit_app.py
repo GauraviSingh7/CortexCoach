@@ -14,7 +14,9 @@ import numpy as np
 import cv2
 from datetime import datetime
 import logging
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
+import io
+from PIL import Image
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -634,22 +636,16 @@ class StreamlitCoachingApp:
         )
 
     
-    def analyze_text_features(self, text: str) -> Dict:
-        """Analyze text for additional features"""
+    def analyze_text_features(self, text: str) -> Dict[str, Any]:
+        """Analyze text for sarcasm, sentiment, etc."""
+        if not hasattr(st.session_state, 'multimodal_processor'):
+            return {'sarcasm_detected': False, 'sarcasm_confidence': 0.0, 'sentiment': {}}
         
-        try:
-            if st.session_state.multimodal_processor:
-                return st.session_state.multimodal_processor.analyze_text(text)
-        except Exception as e:
-            logger.error(f"Text analysis error: {e}")
+        # Ensure text is a string, not a list
+        if isinstance(text, list):
+            text = ' '.join(text) if text else ""
         
-        # Fallback simple analysis
-        return {
-            'sentiment': {'positive': 0.5, 'negative': 0.5},
-            'sarcasm_detected': False,
-            'sarcasm_confidence': 0.0,
-            'digression_detected': False
-        }
+        return st.session_state.multimodal_processor.analyze_text(str(text))
     
     def process_facial_emotion(self, image_data) -> Optional[Dict]:
         """Process facial emotion from camera input"""
@@ -657,7 +653,9 @@ class StreamlitCoachingApp:
         try:
             if st.session_state.multimodal_processor:
                 # Convert image data to format expected by processor
-                image_array = np.array(image_data)
+                image_bytes = image_data.getvalue()
+                image_pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+                image_array = np.array(image_pil)
                 return st.session_state.multimodal_processor.process_facial_emotion(image_array)
         except Exception as e:
             logger.error(f"Facial emotion processing error: {e}")
