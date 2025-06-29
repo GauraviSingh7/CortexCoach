@@ -20,6 +20,7 @@ from PIL import Image
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from tensorflow.keras.models import load_model
 
 # App config and components
 from config.settings import get_settings, MODEL_PATHS
@@ -322,10 +323,8 @@ class StreamlitCoachingApp:
         st.header("📊 Session Analytics")
         
         # Emotion analysis
-        if st.session_state.emotion_history:
-            EmotionAnalysisComponent().render_emotion_timeline(
-                st.session_state.emotion_history
-            )
+        if "emotion_chart_placeholder" not in st.session_state:
+            st.session_state.emotion_chart_placeholder = EmotionAnalysisComponent().render_live_emotion_placeholder()
         
         st.divider()
         
@@ -418,17 +417,82 @@ class StreamlitCoachingApp:
         
         with col1:
             if st.session_state.camera_enabled:
-                st.subheader("📹 Camera Feed")
+                st.subheader("📹 Real-Time Emotion Tracking")
+
+                def run_real_time_emotion_loop():
+                    model = load_model(r"C:\Users\vedan\Desktop\coachingSystem\models\saved_models\emotion_model.h5")
+                    emotion_labels = ['angry', 'disgust', 'fear', 'happy', 'sad', 'surprise', 'neutral']
+                    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+                    emotion_component = EmotionAnalysisComponent()
+
+                    FRAME_WINDOW = st.image([])
+
+                    cap = cv2.VideoCapture(0)
+
+                    if not cap.isOpened():
+                        st.error("Could not open webcam.")
+                        return
+
+                    st.info("Press **Stop Webcam** in the sidebar to stop.")
+
+                    # Create separate placeholders for chart and text
+                    if "emotion_chart_placeholder" not in st.session_state:
+                        st.session_state.emotion_chart_placeholder = st.empty()
+                    if "emotion_text_placeholder" not in st.session_state:
+                        st.session_state.emotion_text_placeholder = st.empty()
+
+                    chart = st.session_state.emotion_chart_placeholder
+                    text = st.session_state.emotion_text_placeholder
+
+                    while st.session_state.camera_enabled:
+                        ret, frame = cap.read()
+                        if not ret:
+                            st.warning("Webcam feed not available.")
+                            break
+
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+
+                        latest_scores = {label: 0.0 for label in emotion_labels}
+
+                        for (x, y, w, h) in faces:
+                            roi_gray = gray[y:y+h, x:x+w]
+                            roi = cv2.resize(roi_gray, (48, 48))
+                            roi = roi.astype('float32') / 255.0
+                            roi = np.expand_dims(roi, axis=0)
+                            roi = np.expand_dims(roi, axis=-1)
+
+                            preds = model.predict(roi, verbose=0)[0]
+                            for i, label in enumerate(emotion_labels):
+                                latest_scores[label] = float(preds[i])
+
+                            # Annotate the frame
+                            label = emotion_labels[np.argmax(preds)]
+                            confidence = np.max(preds)
+                            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                            cv2.putText(frame, f"{label} ({confidence*100:.1f}%)", (x, y-10),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
+
+                            break  # just process one face
+
+                        # Show webcam frame
+                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        FRAME_WINDOW.image(frame_rgb)
+
+                        # Update live chart and text
+                        if latest_scores:
+                            emotion_component.update_real_time_emotion_chart(
+                                chart, text, {k.lower(): v for k, v in latest_scores.items()}
+                            )
+
+                        time.sleep(0.1)
+
+                    cap.release()
+
+            if st.session_state.camera_enabled:
+                st.subheader("📹 Real-Time Emotion Tracking")
+                run_real_time_emotion_loop()
                 
-                # Camera input
-                camera_input = st.camera_input("Take a photo for emotion analysis")
-                
-                if camera_input is not None:
-                    # Process facial emotion
-                    emotion_data = self.process_facial_emotion(camera_input)
-                    if emotion_data:
-                        EmotionAnalysisComponent().render_real_time_emotion(emotion_data)
-        
         with col2:
             if st.session_state.audio_enabled:
                 st.subheader("🎤 Audio Input")

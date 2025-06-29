@@ -31,19 +31,16 @@ class EmotionAnalysisComponent:
             'neutral': '#708090'     # Slate Gray
         }
     
-    def render_real_time_emotion(self, emotion_data: Dict[str, float]):
-        """Render real-time facial emotion analysis"""
-        
+    def update_real_time_emotion_chart(self, chart_placeholder, text_placeholder, emotion_data: Dict[str, float]):
+        """Update a persistent chart and status text separately"""
         if not emotion_data:
-            st.info("No emotion data available")
+            chart_placeholder.empty()
+            text_placeholder.info("No emotion data available")
             return
-        
-        st.subheader("😊 Facial Emotion Analysis")
-        
-        # Create emotion bars
+
         emotions = list(emotion_data.keys())
         values = list(emotion_data.values())
-        
+
         fig = go.Figure(data=[
             go.Bar(
                 x=values,
@@ -54,25 +51,27 @@ class EmotionAnalysisComponent:
                 textposition='auto'
             )
         ])
-        
+
         fig.update_layout(
-            title="Current Emotional State",
+            title="😊 Real-Time Facial Emotion",
             xaxis_title="Confidence",
             yaxis_title="Emotions",
             height=300,
             margin=dict(l=10, r=10, t=30, b=10)
         )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Dominant emotion
+
+        chart_placeholder.plotly_chart(fig, use_container_width=True)
+
         dominant_emotion = max(emotion_data, key=emotion_data.get)
         confidence = emotion_data[dominant_emotion]
-        
-        if confidence > 0.5:
-            st.success(f"Dominant emotion: **{dominant_emotion.title()}** ({confidence:.1%})")
-        else:
-            st.info(f"Mixed emotions detected (highest: {dominant_emotion.title()} at {confidence:.1%})")
+
+        status = (
+            f"Dominant emotion: **{dominant_emotion.title()}** ({confidence:.1%})"
+            if confidence > 0.5 else
+            f"Mixed emotions detected (highest: {dominant_emotion.title()} at {confidence:.1%})"
+        )
+        text_placeholder.markdown(status)
+
     
     def render_voice_emotion(self, voice_emotion_data: Dict[str, float]):
         """Render voice emotion analysis"""
@@ -194,6 +193,62 @@ class EmotionAnalysisComponent:
         )
         
         st.plotly_chart(fig, use_container_width=True)
+    
+    def render_live_emotion_placeholder(self):
+        """Create a persistent emotion chart area and return update handle"""
+        return st.empty()
+    
+    # def init_emotion_bar_widget(self, emotions: List[str]) -> go.FigureWidget:
+    #     """Initialize persistent emotion bar chart with FigureWidget (for smooth updates)"""
+    #     initial_values = [0.0] * len(emotions)
+
+    #     fig = go.FigureWidget(
+    #         data=[go.Bar(
+    #             x=initial_values,
+    #             y=emotions,
+    #             orientation='h',
+    #             marker_color=[self.emotion_colors.get(e, '#808080') for e in emotions],
+    #             text=[f'{v:.2f}' for v in initial_values],
+    #             textposition='auto'
+    #         )]
+    #     )
+
+    #     fig.update_layout(
+    #         title="😊 Real-Time Facial Emotion",
+    #         xaxis_title="Confidence",
+    #         yaxis_title="Emotions",
+    #         height=300,
+    #         margin=dict(l=10, r=10, t=30, b=10),
+    #         showlegend=False
+    #     )
+
+    #     return fig
+    
+    # def update_emotion_bar_widget(self, fig_widget: go.FigureWidget, emotion_data: Dict[str, float]):
+    #     """Efficiently update an existing Plotly FigureWidget (no flicker)"""
+    #     if not fig_widget or not emotion_data:
+    #         return
+
+    #     # Use bar's existing y-values to keep order consistent
+    #     emotions = fig_widget.data[0].y
+    #     values = [emotion_data.get(emotion, 0.0) for emotion in emotions]
+
+    #     fig_widget.data[0].x = values
+    #     fig_widget.data[0].text = [f'{v:.2f}' for v in values]
+
+    # def render_dominant_emotion_text(self, text_placeholder, emotion_data: Dict[str, float]):
+    #     """Render dominant emotion summary separately"""
+    #     if not emotion_data:
+    #         text_placeholder.info("No emotion detected.")
+    #         return
+
+    #     dominant = max(emotion_data, key=emotion_data.get)
+    #     confidence = emotion_data[dominant]
+
+    #     if confidence > 0.5:
+    #         text_placeholder.success(f"Dominant emotion: **{dominant.title()}** ({confidence:.1%})")
+    #     else:
+    #         text_placeholder.info(f"Mixed emotions detected (highest: {dominant.title()} at {confidence:.1%})")
 
 
 class GROWPhaseTracker:
