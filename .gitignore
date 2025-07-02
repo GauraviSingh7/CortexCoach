@@ -64,4 +64,4 @@ models/saved_models/*
 pylint-report.txt
 flake8.log
 
-ui/streamlit_app.py
+ui/*
