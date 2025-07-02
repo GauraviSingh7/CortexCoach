@@ -65,3 +65,8 @@ pylint-report.txt
 flake8.log
 
 ui/*
+
+coaching_server.py
+server.py
+app.py
+run.py
