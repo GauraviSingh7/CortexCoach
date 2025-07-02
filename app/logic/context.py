@@ -6,66 +6,66 @@ from typing import Dict, Any, Optional
 from PIL import Image
 import io
 from core.coaching_rag_system import MultimodalContext, VARKType
+from app.ui.components import EmotionAnalysisComponent
 
 logger = logging.getLogger(__name__)
 
 def create_multimodal_context(self, user_input: str) -> MultimodalContext:
-        """Create multimodal context from current state"""
+    """Create multimodal context from current state"""
 
-        # Get latest emotion data
-        latest_facial_emotion = (
-            st.session_state.emotion_history[-1].get('facial_emotion', {}) 
-            if st.session_state.emotion_history else {}
-        )
-        latest_voice_emotion = (
-            st.session_state.emotion_history[-1].get('voice_emotion', {}) 
-            if st.session_state.emotion_history else {}
-        )
+    from app.ui.components import EmotionAnalysisComponent  # just to be explicit here
 
-        # Determine dominant VARK type
-        dominant_vark = max(st.session_state.vark_profile, key=st.session_state.vark_profile.get)
-        vark_confidence = st.session_state.vark_profile[dominant_vark]
+    # Use averaged emotion from last 40 frames
+    facial_emotion = EmotionAnalysisComponent.compute_average_emotion(
+        st.session_state.get("emotion_history", [])
+    )
+    logger.info(f"[CTX] Averaged facial emotion: {facial_emotion}")
 
-        # Interest level
-        interest_level = (
-            np.mean(st.session_state.interest_levels[-5:]) 
-            if st.session_state.interest_levels else 0.5
-        )
 
-        # Text features
-        text_features = self.analyze_text_features(user_input)
+    voice_emotion = {}  # Extend later if needed
 
-        # Use existing goal clarity score (don't recalculate here)
-        goal_clarity_score = st.session_state.goal_clarity_score
+    # Determine dominant VARK type
+    dominant_vark = max(st.session_state.vark_profile, key=st.session_state.vark_profile.get)
+    vark_confidence = st.session_state.vark_profile[dominant_vark]
 
-        logger.info(f"[CTX] Current Phase: {st.session_state.current_phase}, Input: {user_input}")
-        logger.info(f"[CTX] Using existing clarity score: {goal_clarity_score}")
+    # Interest level (last 5 turns)
+    interest_level = (
+        np.mean(st.session_state.interest_levels[-5:]) 
+        if st.session_state.interest_levels else 0.5
+    )
 
-        return MultimodalContext(
-            user_id=st.session_state.user_id,
-            session_id=st.session_state.session_id,
-            timestamp=datetime.now(),
-            grow_phase=st.session_state.current_phase,
-            utterance=user_input,
+    # Text features (sarcasm, sentiment, digression)
+    text_features = self.analyze_text_features(user_input)
 
-            facial_emotion=latest_facial_emotion,
-            voice_emotion=latest_voice_emotion,
-            text_sentiment=text_features.get('sentiment', {}),
+    goal_clarity_score = st.session_state.goal_clarity_score
 
-            vark_type=VARKType(dominant_vark),
-            vark_confidence=vark_confidence,
+    logger.info(f"[CTX] Current Phase: {st.session_state.current_phase}, Input: {user_input}")
+    logger.info(f"[CTX] Using existing clarity score: {goal_clarity_score}")
 
-            sarcasm_detected=text_features.get('sarcasm_detected', False),
-            sarcasm_confidence=text_features.get('sarcasm_confidence', 0.0),
-            interest_level=interest_level,
-            digression_detected=text_features.get('digression_detected', False),
+    return MultimodalContext(
+        user_id=st.session_state.user_id,
+        session_id=st.session_state.session_id,
+        timestamp=datetime.now(),
+        grow_phase=st.session_state.current_phase,
+        utterance=user_input,
 
-            conversation_turn=st.session_state.conversation_turn,
-            previous_phase_completion=len(st.session_state.phase_history) > 0,
-            goal_clarity_score=goal_clarity_score,
-            system_instruction=""
-        )
+        facial_emotion=facial_emotion,
+        voice_emotion=voice_emotion,
+        text_sentiment=text_features.get('sentiment', {}),
 
+        vark_type=VARKType(dominant_vark),
+        vark_confidence=vark_confidence,
+
+        sarcasm_detected=text_features.get('sarcasm_detected', False),
+        sarcasm_confidence=text_features.get('sarcasm_confidence', 0.0),
+        interest_level=interest_level,
+        digression_detected=text_features.get('digression_detected', False),
+
+        conversation_turn=st.session_state.conversation_turn,
+        previous_phase_completion=len(st.session_state.phase_history) > 0,
+        goal_clarity_score=goal_clarity_score,
+        system_instruction=""
+    )
     
 def analyze_text_features(self, text: str) -> Dict[str, Any]:
     if not hasattr(st.session_state, 'multimodal_processor'):

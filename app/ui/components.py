@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable, Any
 import json
@@ -16,7 +17,8 @@ project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
 from core.coaching_rag_system import GROWPhase, VARKType
-
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 class EmotionAnalysisComponent:
     """Component for displaying emotion analysis data"""
@@ -198,6 +200,29 @@ class EmotionAnalysisComponent:
     def render_live_emotion_placeholder(self):
         """Create a persistent emotion chart area and return update handle"""
         return st.empty()
+
+    @staticmethod
+    def compute_average_emotion(history: List[Dict[str, float]]) -> Dict[str, float]:
+        if not history:
+            logger.warning("[AVERAGING] No history available")
+            return {}
+
+        try:
+            avg_scores = {k: 0.0 for k in history[0]}
+            for frame in history:
+                for k, v in frame.items():
+                    avg_scores[k] += v
+
+            count = len(history)
+            result = {k: v / count for k, v in avg_scores.items()}
+
+            top = max(result, key=result.get)
+            logger.info(f"[AVERAGING] Using {count} frames. Dominant: {top} ({result[top]:.2f})")
+            return result
+        except Exception as e:
+            logger.error(f"[AVERAGING ERROR] Failed to average emotions: {e}")
+            return {}
+
     
     # def init_emotion_bar_widget(self, emotions: List[str]) -> go.FigureWidget:
     #     """Initialize persistent emotion bar chart with FigureWidget (for smooth updates)"""
@@ -720,7 +745,7 @@ class ChatInterface:
                                         st.write(f"**Style:** {vark}")
                                     with col4:
                                         sarcasm_conf = context_data.get('sarcasm_confidence', 0)
-                                        if sarcasm_conf > 0.1:
+                                        if sarcasm_conf > 0.0:
                                             st.write(f"**Sarcasm:** {sarcasm_conf:.1%}")
                 
                 st.divider()

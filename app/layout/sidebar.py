@@ -8,83 +8,52 @@ def render_sidebar(self):
     
     with st.sidebar:
         st.header("🎛️ Controls")
-        
-        # Check if response is being generated
-        waiting_for_response = st.session_state.get('waiting_for_response', False)
-    
-        # Show waiting indicator and hide all content if response is being generated
-        if waiting_for_response:
-            st.warning("⏳ Generating response...")
-            st.markdown("*Please wait...*")
-            with st.spinner("Processing your message..."):
-                st.empty()
-            return 
-        
-        ui_locked = waiting_for_response
+
+        # --- Removed waiting spinner and disabling logic ---
 
         # Session controls
         if st.session_state.session_id:
             st.success(f"Session: {st.session_state.session_id[:8]}...")
-            
+
             st.button(
                 "End Session", 
                 type="secondary", 
-                disabled=ui_locked,
                 key=f"end_session_button_{st.session_state.session_id}"
             )
         
         st.divider()
         
-        # Multimodal settings - fully disabled during response
+        # Multimodal settings (no disabling now)
         st.subheader("📹 Input Settings")
         camera_enabled = st.checkbox(
             "Enable Camera", 
             value=st.session_state.get('camera_enabled', False),
-            disabled=ui_locked,
             key=f"camera_checkbox_{st.session_state.get('session_id', 'default')}"
         )
         
         audio_enabled = st.checkbox(
             "Enable Microphone", 
             value=st.session_state.get('audio_enabled', False),
-            disabled=ui_locked,
             key=f"audio_checkbox_{st.session_state.get('session_id', 'default')}"
         )
         
-        # Update session state only if UI is not locked
-        if not ui_locked:
-            st.session_state.camera_enabled = camera_enabled
-            st.session_state.audio_enabled = audio_enabled
-        
+        # Update session state
+        st.session_state.camera_enabled = camera_enabled
+        st.session_state.audio_enabled = audio_enabled
+
         st.divider()
         
-        
-        # # GROW Phase Display (non-interactive, always enabled)
-        # st.subheader("🎯 GROW Model")
-        # try:
-        #     current_phase = st.session_state.get('current_phase', GROWPhase.GOAL)
-        #     if isinstance(current_phase, str):
-        #         current_phase = GROWPhase(current_phase)
-        #     GROWPhaseTracker().render(
-        #         current_phase=current_phase,
-        #         phase_history=st.session_state.get('phase_history', [])
-        #     )
-        # except Exception as e:
-        #     st.error(f"Error displaying GROW phase: {e}")
-        
-        # st.divider()
-        
-        # Phase Tips - moved from main interface to sidebar
+        # Phase tips (always visible)
         self.render_phase_tips()
         
         st.divider()
-        
-        # Analytics - always shown (no toggle)
-        if not waiting_for_response:
-            try:
-                self.render_sidebar_analytics()
-            except Exception as e:
-                st.error(f"Error rendering analytics: {e}")
+
+        # Analytics (always rendered)
+        try:
+            self.render_sidebar_analytics()
+        except Exception as e:
+            st.error(f"Error rendering analytics: {e}")
+
 
 def render_phase_tips(self):
     """Render phase tips in sidebar"""

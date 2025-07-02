@@ -81,14 +81,18 @@ def generate_coaching_response(self, user_input: str, initial: bool = False):
 
         # Create multimodal context
         context = self.create_multimodal_context(user_input)
-        
+
+        # Extract dominant emotion for logging and UI
+        dominant_emotion = self.get_dominant_emotion_from_context(context)
+        logger.info(f"[EMOTION] Dominant emotion passed to coach: {dominant_emotion}")
+
         # Generate response using the coaching system
         coaching_response = st.session_state.coaching_system.generate_coaching_response(context)
-        
+
         if not coaching_response or not coaching_response.strip():
             logger.warning("Empty response generated, using fallback")
             coaching_response = "I understand. Could you tell me more about that?"
-        
+
         # Add to conversation history
         response_entry = {
             'role': 'assistant',
@@ -96,29 +100,33 @@ def generate_coaching_response(self, user_input: str, initial: bool = False):
             'timestamp': datetime.now(),
             'phase': st.session_state.current_phase.value,
             'context_data': {
-                'dominant_emotion': self.get_dominant_emotion_from_context(context),
+                'dominant_emotion': dominant_emotion,
                 'interest_level': getattr(context, 'interest_level', 0.5),
                 'vark_type': getattr(context, 'vark_type', 'visual').value if hasattr(getattr(context, 'vark_type', 'visual'), 'value') else str(getattr(context, 'vark_type', 'visual')),
                 'sarcasm_detected': getattr(context, 'sarcasm_detected', False),
                 'sarcasm_confidence': float(getattr(context, 'sarcasm_confidence', 0.0) or 0.0)
             }
         }
-        logger.info(f"🎭 Sarcasm data: detected={response_entry['context_data']['sarcasm_detected']}, confidence={response_entry['context_data']['sarcasm_confidence']:.2f}")
-        
+
+        logger.info(
+            f"🎭 Sarcasm data: detected={response_entry['context_data']['sarcasm_detected']}, "
+            f"confidence={response_entry['context_data']['sarcasm_confidence']:.2f}"
+        )
+
         st.session_state.conversation_history.append(response_entry)
-        
+
         # Update analytics
         try:
             self.update_analytics(context)
         except Exception as e:
             logger.warning(f"Analytics update failed: {e}")
-        
+
         logger.info(f"✅ Response generated successfully: {coaching_response[:50]}...")
-        
+
     except Exception as e:
         st.error(f"Failed to generate response: {e}")
         logger.error(f"Response generation error: {e}")
-        
+
         # Add fallback response to prevent conversation from breaking
         fallback_response = {
             'role': 'assistant',
@@ -127,13 +135,11 @@ def generate_coaching_response(self, user_input: str, initial: bool = False):
             'phase': st.session_state.current_phase.value
         }
         st.session_state.conversation_history.append(fallback_response)
-        
+
     finally:
         # CRITICAL: Always reset flags and rerun, regardless of success or failure
         st.session_state.waiting_for_response = False
         st.session_state.ui_locked = False
-        
+
         logger.info("🔓 Response generation flags cleared, triggering rerun")
-        
-        # Force rerun to show the response and unlock UI
         st.rerun()
