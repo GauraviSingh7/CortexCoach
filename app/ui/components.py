@@ -616,6 +616,8 @@ class ChatInterface:
             'options': '#45B7D1',
             'will': '#96CEB4'
         }
+
+        self._sarcasm_component = None
     
     def render(self, conversation_history: List[Dict], on_message_submit: Callable[[str], None]):
         """Render chat interface"""
@@ -628,7 +630,9 @@ class ChatInterface:
     
     def render_chat_history(self, conversation_history: List[Dict]):
         """Render chat message history"""
-        
+
+        print("DEBUG: conversation_history =", conversation_history)
+
         # Chat container
         chat_container = st.container()
         
@@ -662,12 +666,46 @@ class ChatInterface:
                         else:  # assistant
                             st.write(content)
                             
+                            # **ADD SARCASM DETECTION HERE**
+                            if 'context_data' in message:
+                                context_data = message['context_data']
+                                sarcasm_confidence = context_data.get('sarcasm_confidence', 0.0)
+                                sarcasm_detected = context_data.get('sarcasm_detected', False)
+                                
+                                # Show sarcasm indicator if confidence > 0.3
+                                if sarcasm_confidence >= 0.3:
+                                    # Initialize component if needed
+                                    if self._sarcasm_component is None:
+                                        from app.ui.components import SarcasmDetectionComponent
+                                        self._sarcasm_component = SarcasmDetectionComponent()
+                                    
+                                    # Compact inline indicator
+                                    icon = "😏" if sarcasm_detected else "🤔"
+                                    status = "Sarcastic" if sarcasm_detected else "Uncertain tone"
+                                    color = "#FF6B6B" if sarcasm_detected else "#FFD93D"
+                                    
+                                    st.markdown(f"""
+                                    <div style="display: inline-block; padding: 4px 12px; margin: 4px 0; 
+                                         border-radius: 12px; background-color: {color}20; border: 1px solid {color}; 
+                                         font-size: 12px; color: {color};">
+                                        {icon} {status} ({sarcasm_confidence:.0%})
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                    
+                                    # Expandable detailed view
+                                    with st.expander("🎭 Sarcasm Analysis", expanded=False):
+                                        self._sarcasm_component.render(
+                                            is_sarcastic=sarcasm_detected,
+                                            confidence=sarcasm_confidence,
+                                            text=content
+                                        )
+                            
                             # Show context data if available
                             if 'context_data' in message:
                                 with st.expander("Context Data", expanded=False):
                                     context_data = message['context_data']
                                     
-                                    col1, col2, col3 = st.columns(3)
+                                    col1, col2, col3, col4 = st.columns(4)
                                     
                                     with col1:
                                         emotion = context_data.get('dominant_emotion', 'neutral')
@@ -680,6 +718,10 @@ class ChatInterface:
                                     with col3:
                                         vark = context_data.get('vark_type', 'visual')
                                         st.write(f"**Style:** {vark}")
+                                    with col4:
+                                        sarcasm_conf = context_data.get('sarcasm_confidence', 0)
+                                        if sarcasm_conf > 0.1:
+                                            st.write(f"**Sarcasm:** {sarcasm_conf:.1%}")
                 
                 st.divider()
     
@@ -827,3 +869,179 @@ class FeedbackCollector:
                     }
                     on_feedback_submit(feedback_data)
                     st.success("Suggestion noted!")
+
+class SarcasmDetectionComponent:
+    """Component for displaying sarcasm detection results"""
+
+    def __init__(self):
+        self.sarcasm_colors = {
+            'detected': '#FF6B6B',      # Red for sarcasm
+            'not_detected': '#96CEB4',   # Green for normal
+            'uncertain': '#FFD93D'       # Yellow for uncertain
+        }
+        
+        self.sarcasm_icons = {
+            'detected': '😏',
+            'not_detected': '😊', 
+            'uncertain': '🤔'
+        }
+
+    def render(self, is_sarcastic: bool, confidence: float, text: str = ""):
+        """Render basic sarcasm detection display"""
+        
+        # Determine status
+        if confidence > 0.7:
+            status = 'detected' if is_sarcastic else 'not_detected'
+        else:
+            status = 'uncertain'
+        
+        icon = self.sarcasm_icons[status]
+        color = self.sarcasm_colors[status]
+        
+        # Main display
+        st.markdown(f"""
+        <div style="padding: 10px; border-left: 4px solid {color}; background-color: rgba({self._hex_to_rgb(color)}, 0.1);">
+            <h4>{icon} Sarcasm Detection</h4>
+            <p><strong>Status:</strong> {'Sarcasm Detected' if is_sarcastic else 'Normal Tone'}</p>
+            <p><strong>Confidence:</strong> {confidence:.1%}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    def render_detailed(self, is_sarcastic: bool, confidence: float, text: str = "", history: List[Dict] = None):
+        """Render detailed sarcasm analysis with confidence meter and history"""
+        
+        st.subheader("😏 Sarcasm Analysis")
+        
+        # Confidence gauge
+        fig = go.Figure(go.Indicator(
+            mode = "gauge+number+delta",
+            value = confidence * 100,
+            domain = {'x': [0, 1], 'y': [0, 1]},
+            title = {'text': "Sarcasm Confidence"},
+            delta = {'reference': 50},
+            gauge = {
+                'axis': {'range': [None, 100]},
+                'bar': {'color': self.sarcasm_colors['detected'] if is_sarcastic else self.sarcasm_colors['not_detected']},
+                'steps': [
+                    {'range': [0, 30], 'color': self.sarcasm_colors['not_detected']},
+                    {'range': [30, 70], 'color': self.sarcasm_colors['uncertain']},
+                    {'range': [70, 100], 'color': self.sarcasm_colors['detected']}
+                ],
+                'threshold': {
+                    'line': {'color': "red", 'width': 4},
+                    'thickness': 0.75,
+                    'value': 70
+                }
+            }
+        ))
+        
+        fig.update_layout(height=300, margin=dict(l=20, r=20, t=50, b=20))
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Current analysis
+        status_text = "🎭 **Sarcasm Detected**" if is_sarcastic else "💬 **Normal Tone**"
+        if confidence < 0.5:
+            status_text = "🤷 **Uncertain**"
+            
+        st.markdown(f"""
+        **Current Analysis:**
+        - {status_text}
+        - Confidence: {confidence:.1%}
+        - Threshold: 70%
+        """)
+        
+        if text:
+            st.markdown(f"**Text analyzed:** *\"{text[:100]}{'...' if len(text) > 100 else ''}\"*")
+        
+        # Sarcasm history trend
+        if history and len(history) > 1:
+            self._render_sarcasm_trend(history)
+
+    def render_live_indicator(self, is_sarcastic: bool, confidence: float):
+        """Render a simple live indicator for real-time detection"""
+        
+        icon = self.sarcasm_icons['detected'] if is_sarcastic else self.sarcasm_icons['not_detected']
+        status = "SARCASM" if is_sarcastic else "NORMAL"
+        color = self.sarcasm_colors['detected'] if is_sarcastic else self.sarcasm_colors['not_detected']
+        
+        st.markdown(f"""
+        <div style="text-align: center; padding: 15px; border-radius: 10px; background-color: {color}; color: white;">
+            <h2 style="margin: 0;">{icon} {status}</h2>
+            <p style="margin: 5px 0 0 0; opacity: 0.9;">{confidence:.1%} confidence</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    def render_coaching_insight(self, is_sarcastic: bool, confidence: float, coaching_tip: str = ""):
+        """Render sarcasm detection with coaching insights"""
+        
+        if is_sarcastic and confidence > 0.7:
+            st.info(f"🎭 **Sarcasm detected** ({confidence:.1%} confidence)")
+            if coaching_tip:
+                st.markdown(f"💡 **Coaching Insight:** {coaching_tip}")
+            else:
+                st.markdown("💡 **Coaching Insight:** I notice some skepticism in your tone. Let's explore what might be behind that feeling.")
+        elif confidence < 0.5:
+            st.warning(f"🤔 **Uncertain tone** ({confidence:.1%} confidence) - Monitoring for context...")
+
+    def _render_sarcasm_trend(self, history: List[Dict]):
+        """Render sarcasm detection trend over time"""
+        
+        st.markdown("**📈 Sarcasm Trend**")
+        
+        if len(history) < 2:
+            st.write("Not enough data for trend analysis")
+            return
+        
+        # Extract data for plotting
+        timestamps = [entry.get('timestamp', i) for i, entry in enumerate(history)]
+        confidences = [entry.get('confidence', 0) for entry in history]
+        sarcasm_flags = [entry.get('is_sarcastic', False) for entry in history]
+        
+        fig = go.Figure()
+        
+        # Confidence line
+        fig.add_trace(go.Scatter(
+            x=list(range(len(timestamps))),
+            y=[c * 100 for c in confidences],
+            mode='lines+markers',
+            name='Confidence',
+            line=dict(color='blue', width=2),
+            marker=dict(size=6)
+        ))
+        
+        # Sarcasm detection markers
+        sarcasm_x = [i for i, flag in enumerate(sarcasm_flags) if flag]
+        sarcasm_y = [confidences[i] * 100 for i in sarcasm_x]
+        
+        if sarcasm_x:
+            fig.add_trace(go.Scatter(
+                x=sarcasm_x,
+                y=sarcasm_y,
+                mode='markers',
+                name='Sarcasm Detected',
+                marker=dict(
+                    size=12,
+                    color=self.sarcasm_colors['detected'],
+                    symbol='diamond'
+                )
+            ))
+        
+        # Threshold line
+        fig.add_hline(y=70, line_dash="dash", line_color="red", 
+                     annotation_text="Sarcasm Threshold (70%)")
+        
+        fig.update_layout(
+            title="Sarcasm Detection Over Time",
+            xaxis_title="Message Number",
+            yaxis_title="Confidence (%)",
+            height=300,
+            margin=dict(l=10, r=10, t=30, b=10)
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+
+    def _hex_to_rgb(self, hex_color: str) -> str:
+        """Convert hex color to RGB string for CSS"""
+        hex_color = hex_color.lstrip('#')
+        rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        return f"{rgb[0]}, {rgb[1]}, {rgb[2]}"

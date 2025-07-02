@@ -4,7 +4,7 @@ import cv2
 import time
 from tensorflow.keras.models import load_model
 from core.coaching_rag_system import GROWPhase
-from ui.components import (
+from app.ui.components import (
     EmotionAnalysisComponent,
     GROWPhaseTracker,
     SessionMetricsComponent,

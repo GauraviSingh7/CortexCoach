@@ -98,9 +98,12 @@ def generate_coaching_response(self, user_input: str, initial: bool = False):
             'context_data': {
                 'dominant_emotion': self.get_dominant_emotion_from_context(context),
                 'interest_level': getattr(context, 'interest_level', 0.5),
-                'vark_type': getattr(context, 'vark_type', 'visual').value if hasattr(getattr(context, 'vark_type', 'visual'), 'value') else str(getattr(context, 'vark_type', 'visual'))
+                'vark_type': getattr(context, 'vark_type', 'visual').value if hasattr(getattr(context, 'vark_type', 'visual'), 'value') else str(getattr(context, 'vark_type', 'visual')),
+                'sarcasm_detected': getattr(context, 'sarcasm_detected', False),
+                'sarcasm_confidence': float(getattr(context, 'sarcasm_confidence', 0.0) or 0.0)
             }
         }
+        logger.info(f"🎭 Sarcasm data: detected={response_entry['context_data']['sarcasm_detected']}, confidence={response_entry['context_data']['sarcasm_confidence']:.2f}")
         
         st.session_state.conversation_history.append(response_entry)
         

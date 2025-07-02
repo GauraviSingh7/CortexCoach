@@ -78,7 +78,6 @@ def analyze_text_features(self, text: str) -> Dict[str, Any]:
             'vark_confidence': 0.25
         }
 
-    # Ensure text is a plain string
     if isinstance(text, list):
         text = " ".join(map(str, text))
     elif not isinstance(text, str):
@@ -87,7 +86,15 @@ def analyze_text_features(self, text: str) -> Dict[str, Any]:
     if not text.strip():
         return {}
 
-    return st.session_state.multimodal_processor.analyze_text(text)
+    # Get real output from model
+    result = st.session_state.multimodal_processor.analyze_text(text)
+
+    # Ensure sarcasm fields are present
+    result.setdefault('sarcasm_detected', False)
+    result.setdefault('sarcasm_confidence', 0.0)
+
+    return result
+
 
 
 def process_facial_emotion(self, image_data) -> Optional[Dict]:
