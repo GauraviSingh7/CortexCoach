@@ -76,74 +76,6 @@ class EmotionAnalysisComponent:
         text_placeholder.markdown(status)
 
     
-    def render_voice_emotion(self, voice_emotion_data: Dict[str, float]):
-        """Render voice emotion analysis"""
-        
-        if not voice_emotion_data:
-            st.info("No voice emotion data available")
-            return
-        
-        st.subheader("🎤 Voice Emotion Analysis")
-        
-        # Voice emotion metrics
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            valence = voice_emotion_data.get('valence', 0.5)
-            st.metric(
-                "Valence",
-                f"{valence:.2f}",
-                delta=f"{valence - 0.5:.2f}" if valence != 0.5 else None,
-                help="Positive (happy) vs Negative (sad) emotion"
-            )
-        
-        with col2:
-            arousal = voice_emotion_data.get('arousal', 0.5)
-            st.metric(
-                "Arousal",
-                f"{arousal:.2f}",
-                delta=f"{arousal - 0.5:.2f}" if arousal != 0.5 else None,
-                help="High (excited) vs Low (calm) energy"
-            )
-        
-        with col3:
-            dominance = voice_emotion_data.get('dominance', 0.5)
-            st.metric(
-                "Dominance",
-                f"{dominance:.2f}",
-                delta=f"{dominance - 0.5:.2f}" if dominance != 0.5 else None,
-                help="Strong (confident) vs Weak (submissive) emotion"
-            )
-        
-        # Voice emotion radar chart
-        if len(voice_emotion_data) > 3:
-            categories = list(voice_emotion_data.keys())
-            values = list(voice_emotion_data.values())
-            
-            fig = go.Figure()
-            
-            fig.add_trace(go.Scatterpolar(
-                r=values,
-                theta=categories,
-                fill='toself',
-                name='Voice Emotion',
-                line_color='#FF6B6B'
-            ))
-            
-            fig.update_layout(
-                polar=dict(
-                    radialaxis=dict(
-                        visible=True,
-                        range=[0, 1]
-                    )
-                ),
-                showlegend=False,
-                height=300,
-                margin=dict(l=10, r=10, t=30, b=10)
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-    
     def render_emotion_timeline(self, emotion_history: List[Dict]):
         """Render emotion timeline over the session"""
         
@@ -201,6 +133,61 @@ class EmotionAnalysisComponent:
         """Create a persistent emotion chart area and return update handle"""
         return st.empty()
 
+    def render_aggregated_emotion_bars(self, frame_history: List[Dict[str, float]], chunk_size: int = 40):
+        """Render bar chart showing dominant emotion over time (averaged chunks)"""
+
+        if not frame_history or len(frame_history) < chunk_size:
+            st.info("Not enough data to display emotion summary yet.")
+            return
+
+        chunked_results = []
+        num_chunks = len(frame_history) // chunk_size
+
+        for i in range(num_chunks):
+            chunk = frame_history[i * chunk_size : (i + 1) * chunk_size]
+            averaged = self.compute_average_emotion(chunk)
+            if averaged:
+                top_emotion = max(averaged, key=averaged.get)
+                confidence = averaged[top_emotion]
+                chunked_results.append({
+                    'index': i,
+                    'dominant_emotion': top_emotion,
+                    'confidence': confidence,
+                    'color': self.emotion_colors.get(top_emotion, '#888888')
+                })
+
+        if not chunked_results:
+            st.info("No dominant emotion data available.")
+            return
+
+        fig = go.Figure(data=[
+            go.Bar(
+                x=[r['index'] for r in chunked_results],
+                y=[r['confidence'] for r in chunked_results],
+                marker_color=[r['color'] for r in chunked_results],
+                text=[r['dominant_emotion'].title() for r in chunked_results],
+                textposition='outside',
+                hovertext=[
+                    f"{r['dominant_emotion'].title()} ({r['confidence']:.2f})"
+                    for r in chunked_results
+                ],
+                hoverinfo="text"
+            )
+        ])
+
+        fig.update_layout(
+            title="🧠 Dominant Emotions (Live)",
+            xaxis_title="Chunk Index",
+            yaxis_title="Confidence",
+            height=250, # 👈 smaller height for sidebar
+            margin=dict(l=5, r=5, t=30, b=5),
+            font=dict(size=10)  # Optional: smaller font
+        )
+
+        st.plotly_chart(fig, use_container_width=True, key=f"emotion_bar_{uuid.uuid4()}")
+
+
+
     @staticmethod
     def compute_average_emotion(history: List[Dict[str, float]]) -> Dict[str, float]:
         if not history:
@@ -217,11 +204,80 @@ class EmotionAnalysisComponent:
             result = {k: v / count for k, v in avg_scores.items()}
 
             top = max(result, key=result.get)
-            logger.info(f"[AVERAGING] Using {count} frames. Dominant: {top} ({result[top]:.2f})")
+            #logger.info(f"[AVERAGING] Using {count} frames. Dominant: {top} ({result[top]:.2f})")
             return result
         except Exception as e:
             logger.error(f"[AVERAGING ERROR] Failed to average emotions: {e}")
             return {}
+        
+
+    # def render_voice_emotion(self, voice_emotion_data: Dict[str, float]):
+    #     """Render voice emotion analysis"""
+        
+    #     if not voice_emotion_data:
+    #         st.info("No voice emotion data available")
+    #         return
+        
+    #     st.subheader("🎤 Voice Emotion Analysis")
+        
+    #     # Voice emotion metrics
+    #     col1, col2, col3 = st.columns(3)
+        
+    #     with col1:
+    #         valence = voice_emotion_data.get('valence', 0.5)
+    #         st.metric(
+    #             "Valence",
+    #             f"{valence:.2f}",
+    #             delta=f"{valence - 0.5:.2f}" if valence != 0.5 else None,
+    #             help="Positive (happy) vs Negative (sad) emotion"
+    #         )
+        
+    #     with col2:
+    #         arousal = voice_emotion_data.get('arousal', 0.5)
+    #         st.metric(
+    #             "Arousal",
+    #             f"{arousal:.2f}",
+    #             delta=f"{arousal - 0.5:.2f}" if arousal != 0.5 else None,
+    #             help="High (excited) vs Low (calm) energy"
+    #         )
+        
+    #     with col3:
+    #         dominance = voice_emotion_data.get('dominance', 0.5)
+    #         st.metric(
+    #             "Dominance",
+    #             f"{dominance:.2f}",
+    #             delta=f"{dominance - 0.5:.2f}" if dominance != 0.5 else None,
+    #             help="Strong (confident) vs Weak (submissive) emotion"
+    #         )
+        
+    #     # Voice emotion radar chart
+    #     if len(voice_emotion_data) > 3:
+    #         categories = list(voice_emotion_data.keys())
+    #         values = list(voice_emotion_data.values())
+            
+    #         fig = go.Figure()
+            
+    #         fig.add_trace(go.Scatterpolar(
+    #             r=values,
+    #             theta=categories,
+    #             fill='toself',
+    #             name='Voice Emotion',
+    #             line_color='#FF6B6B'
+    #         ))
+            
+    #         fig.update_layout(
+    #             polar=dict(
+    #                 radialaxis=dict(
+    #                     visible=True,
+    #                     range=[0, 1]
+    #                 )
+    #             ),
+    #             showlegend=False,
+    #             height=300,
+    #             margin=dict(l=10, r=10, t=30, b=10)
+    #         )
+            
+    #         st.plotly_chart(fig, use_container_width=True)
 
     
     # def init_emotion_bar_widget(self, emotions: List[str]) -> go.FigureWidget:
@@ -570,7 +626,7 @@ class VARKStyleAnalyzer:
     def render_detailed_analysis(self, vark_profile: Dict[str, float]):
         """Render detailed VARK analysis"""
         
-        st.subheader("🎨 Learning Style Analysis")
+        #st.subheader("🎨 Learning Style Analysis")
         
         # VARK radar chart
         categories = list(vark_profile.keys())
