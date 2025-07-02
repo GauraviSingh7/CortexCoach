@@ -63,3 +63,5 @@ models/saved_models/*
 # Linting
 pylint-report.txt
 flake8.log
+
+ui/steamlit_app.py

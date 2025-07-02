@@ -57,16 +57,23 @@ class MultimodalInferencePipeline:
         Process all available inputs through respective models
         
         Args:
-            text: User utterance text
+            text: User utterance text (string or list of strings)
             image: Webcam image (numpy array)
         
         Returns:
             Dict containing all model outputs
         """
+        # Normalize text input consistently
         if isinstance(text, list):
-            text = ' '.join(text)
+            text = ' '.join(str(item).strip() for item in text if item)
+        elif text is not None:
+            text = str(text).strip()
         
-        logger.debug(f"[Input Text Type] {type(text)} | Value: {text[:50]}")
+        # Skip empty text
+        if not text:
+            text = None
+        
+        logger.debug(f"[Input Text Type] {type(text)} | Value: {text[:50] if text else 'None'}")
 
         results = {
             'facial_emotion': {},

@@ -116,13 +116,16 @@ class FacialEmotionWrapper(ModelWrapper):
             logger.error(f"Facial emotion prediction failed: {e}")
             return {label: 0.0 for label in self.emotion_labels}
 
+
+
 class SarcasmDetectionWrapper(ModelWrapper):
     """Wrapper for BERT-based sarcasm detection model (.pkl)"""
     
     def __init__(self, model_path: str):
         super().__init__(model_path)
         self.tokenizer = None
-        self.max_length = 128  # Adjust based on your model
+        self.max_length = 128  # Will be adjusted based on model requirements
+        self.keras_input_shape = None  # Store the expected input shape for Keras models
         self.load_model()
     
     def load_model(self):
@@ -141,6 +144,18 @@ class SarcasmDetectionWrapper(ModelWrapper):
                 # Initialize default tokenizer if not pickled
                 self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
             
+            # For Keras models, detect the expected input shape
+            if hasattr(self.model, 'input_shape') and 'keras' in str(type(self.model)).lower():
+                input_shape = self.model.input_shape
+                if input_shape and len(input_shape) >= 2:
+                    # input_shape is typically (None, sequence_length) for text models
+                    expected_seq_length = input_shape[1]
+                    if expected_seq_length and expected_seq_length != self.max_length:
+                        logger.info(f"Adjusting max_length from {self.max_length} to {expected_seq_length} based on model input shape")
+                        self.max_length = expected_seq_length
+                    self.keras_input_shape = input_shape
+                    logger.info(f"Keras model input shape: {input_shape}")
+            
             self.is_loaded = True
             logger.info(f"Sarcasm model loaded from {self.model_path}")
             
@@ -148,8 +163,27 @@ class SarcasmDetectionWrapper(ModelWrapper):
             logger.error(f"Failed to load sarcasm model: {e}")
             self.is_loaded = False
     
-    def preprocess_text(self, text: str) -> Dict[str, Any]:
-        """Preprocess text for sarcasm detection"""
+    def preprocess_text_for_keras(self, text: str) -> np.ndarray:
+        """Preprocess text specifically for Keras models"""
+        if not text or not self.tokenizer:
+            return np.array([])
+        
+        # Tokenize text and return only input_ids as numpy array
+        encoded = self.tokenizer.encode_plus(
+            text,
+            add_special_tokens=True,
+            max_length=self.max_length,
+            padding='max_length',
+            truncation=True,
+            return_tensors=None  # Return as lists, not tensors
+        )
+        
+        # Return only input_ids as numpy array with proper shape for Keras
+        input_ids = np.array([encoded['input_ids']])  # Shape: (1, max_length)
+        return input_ids
+    
+    def preprocess_text_for_pytorch(self, text: str) -> Dict[str, Any]:
+        """Preprocess text for PyTorch/Transformers models"""
         if not text or not self.tokenizer:
             return {}
         
@@ -161,57 +195,125 @@ class SarcasmDetectionWrapper(ModelWrapper):
             padding='max_length',
             truncation=True,
             return_attention_mask=True,
-            return_tensors='pt' if hasattr(self.model, 'forward') else None
+            return_tensors='pt'  # Return as PyTorch tensors
         )
         
         return encoded
     
-    def predict(self, text: str) -> Tuple[bool, float]:
-        """Predict sarcasm in text"""
-        # 🚨 Defensive fix: always coerce list inputs into one string
-        if isinstance(text, list):
-            text = " ".join(text)
-
-        # Now ensure model is loaded and text is non-empty
-        if not self.is_loaded or not text:
-            return False, 0.0
-
+    def predict(self, text: Any) -> Tuple[bool, float]:
         try:
-            # Preprocess text
-            processed = self.preprocess_text(text)
-            if not processed:
+            # Convert input to string first, handling various input types
+            if isinstance(text, list):
+                # Join list elements into a single string
+                text = " ".join(str(item).strip() for item in text)
+            elif not isinstance(text, str):
+                text = str(text)
+            
+            # Clean the text
+            text = text.strip()
+            
+            logger.debug(f"[Sarcasm Input] Cleaned Text: {text}")
+
+            if not self.is_loaded or not text:
                 return False, 0.0
 
-            # Make prediction based on model type
-            if hasattr(self.model, 'predict_proba'):
-                # Sklearn-like model
-                if 'input_ids' in processed:
-                    input_data = processed['input_ids'].numpy().flatten()[:self.max_length]
+            # 1) Keras/TensorFlow models
+            if hasattr(self.model, 'predict') and 'keras' in str(type(self.model)).lower():
+                # Use specialized preprocessing for Keras
+                input_data = self.preprocess_text_for_keras(text)
+                if input_data.size == 0:
+                    logger.error("Text preprocessing failed for Keras model")
+                    return False, 0.0
+                
+                logger.debug(f"Keras input shape: {input_data.shape}, expected: {self.keras_input_shape}")
+                
+                # Verify input shape matches model expectations
+                if self.keras_input_shape and len(self.keras_input_shape) >= 2:
+                    expected_length = self.keras_input_shape[1]
+                    if input_data.shape[1] != expected_length:
+                        logger.error(f"Input shape mismatch: got {input_data.shape}, expected (*, {expected_length})")
+                        return False, 0.0
+                
+                # Make prediction with Keras model
+                predictions = self.model.predict(input_data, verbose=0)
+                
+                # Handle different output shapes
+                if predictions.ndim > 1 and predictions.shape[1] > 1:
+                    # Multi-class output: assume class 1 is "sarcastic"
+                    sarcasm_prob = float(predictions[0][1])
+                elif predictions.ndim > 1:
+                    # Single output per sample
+                    sarcasm_prob = float(predictions[0][0])
                 else:
-                    input_data = text  # Use raw text directly
-                probabilities = self.model.predict_proba([input_data])
-                sarcasm_prob = probabilities[0][1] if len(probabilities[0]) > 1 else probabilities[0][0]
+                    # Single value output
+                    sarcasm_prob = float(predictions[0])
 
+            # 2) sklearn models with vectorizer (TfidfVectorizer, CountVectorizer, etc.)
+            elif hasattr(self.model, 'predict_proba') and hasattr(self, 'vectorizer') and self.vectorizer is not None:
+                # Transform text using the vectorizer first
+                text_vectorized = self.vectorizer.transform([text])
+                probabilities = self.model.predict_proba(text_vectorized)
+                
+                # Handle different probability array shapes
+                if probabilities.ndim > 1 and probabilities.shape[1] > 1:
+                    # Binary classification: assume class 1 is "sarcastic"
+                    sarcasm_prob = probabilities[0][1]
+                else:
+                    # Single probability value
+                    sarcasm_prob = probabilities[0] if probabilities.ndim > 0 else probabilities
+
+            # 3) sklearn models without explicit vectorizer (model handles text directly)
+            elif hasattr(self.model, 'predict_proba'):
+                # Some models might handle raw text directly
+                try:
+                    probabilities = self.model.predict_proba([text])
+                    
+                    if probabilities.ndim > 1 and probabilities.shape[1] > 1:
+                        sarcasm_prob = probabilities[0][1]
+                    else:
+                        sarcasm_prob = probabilities[0] if probabilities.ndim > 0 else probabilities
+                except Exception as e:
+                    logger.error(f"Model predict_proba failed with raw text: {e}")
+                    return False, 0.0
+
+            # 4) Hugging‑Face/PyTorch model
             elif hasattr(self.model, 'forward'):
-                # PyTorch BERT model
+                processed = self.preprocess_text_for_pytorch(text)
+                if not processed:
+                    return False, 0.0
+                    
                 with torch.no_grad():
                     outputs = self.model(**processed)
-                    probabilities = torch.softmax(outputs.logits, dim=1)
-                    sarcasm_prob = probabilities[0][1].item()
+                    probs = torch.softmax(outputs.logits, dim=1)[0]
+                    sarcasm_prob = probs[1].item() if len(probs) > 1 else probs[0].item()
 
+            # 5) Fallback custom model
             else:
-                # Custom model - attempt direct prediction
-                sarcasm_prob = self.model.predict([text])[0]
+                if hasattr(self, 'vectorizer') and self.vectorizer is not None:
+                    text_vectorized = self.vectorizer.transform([text])
+                    predictions = self.model.predict(text_vectorized)
+                else:
+                    predictions = self.model.predict([text])
+                    
+                sarcasm_prob = predictions[0] if hasattr(predictions, '__len__') else predictions
 
+            # Ensure probability is in valid range
+            sarcasm_prob = max(0.0, min(1.0, float(sarcasm_prob)))
             is_sarcastic = sarcasm_prob > 0.5
-            confidence = float(sarcasm_prob)
-            self.last_prediction = (is_sarcastic, confidence)
-            return is_sarcastic, confidence
+            
+            logger.debug(f"Sarcasm prediction: {is_sarcastic}, confidence: {sarcasm_prob}")
+            return is_sarcastic, sarcasm_prob
 
         except Exception as e:
             logger.error(f"Sarcasm prediction failed: {e}")
+            logger.error(f"Input type: {type(text)}, Input value: {text}")
+            logger.error(f"Model type: {type(self.model) if hasattr(self, 'model') else 'No model'}")
+            logger.error(f"Has vectorizer: {hasattr(self, 'vectorizer') and self.vectorizer is not None}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return False, 0.0
         
+
         
 class VAKLearningStyleWrapper:
     def __init__(self, model_dir: str):
