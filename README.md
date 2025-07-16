@@ -30,13 +30,13 @@ This project aims to build an **AI-driven coaching system** that facilitates str
 ## 🛠️ Tech Stack (to change with progression)
 
 - **Language:** Python
+- **Frontend:** Streamlit
 - **Libraries/Tools:**  
   - `Whisper`, `pyannote-audio` for speech recognition and diarization  
   - `OpenCV`, `FER` for facial emotion recognition  
   - `Transformers`, `TimeSformer`, `CNN`, `RNN`, and `LSTM` models  
   - `ChromaDB`, `Gemini API` for GenAI-based session enrichment  
-  - `Flask/FastAPI` for backend  
-  - `Socket.IO` or WebSockets for real-time streaming  
+  - `Socket.IO` or WebSockets for real-time streaming  (tbd)
 
 ## 🚀 Getting Started
 
