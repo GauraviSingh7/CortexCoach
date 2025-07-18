@@ -59,7 +59,7 @@ def create_multimodal_context(self, user_input: str) -> MultimodalContext:
         sarcasm_detected=text_features.get('sarcasm_detected', False),
         sarcasm_confidence=text_features.get('sarcasm_confidence', 0.0),
         interest_level=interest_level,
-        digression_detected=text_features.get('digression_detected', False),
+        digression_score=0.0, 
 
         conversation_turn=st.session_state.conversation_turn,
         previous_phase_completion=len(st.session_state.phase_history) > 0,

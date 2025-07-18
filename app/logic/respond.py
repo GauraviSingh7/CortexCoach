@@ -104,7 +104,8 @@ def generate_coaching_response(self, user_input: str, initial: bool = False):
                 'interest_level': getattr(context, 'interest_level', 0.5),
                 'vark_type': getattr(context, 'vark_type', 'visual').value if hasattr(getattr(context, 'vark_type', 'visual'), 'value') else str(getattr(context, 'vark_type', 'visual')),
                 'sarcasm_detected': getattr(context, 'sarcasm_detected', False),
-                'sarcasm_confidence': float(getattr(context, 'sarcasm_confidence', 0.0) or 0.0)
+                'sarcasm_confidence': float(getattr(context, 'sarcasm_confidence', 0.0) or 0.0),
+                'digression_score': getattr(context, 'digression_score', 0.0)
             }
         }
 

@@ -469,7 +469,7 @@ class SessionMetricsComponent:
         st.subheader("📊 Session Metrics")
         
         # Key metrics row
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1:
             duration = metrics.get('session_duration', 0)
@@ -487,6 +487,7 @@ class SessionMetricsComponent:
             phase_info = metrics.get('phase_progression', {})
             progress = phase_info.get('progress_percentage', 0)
             st.metric("Progress", f"{progress:.0f}%")
+        
         
         st.divider()
         
@@ -791,6 +792,11 @@ class ChatInterface:
                                     with col1:
                                         emotion = context_data.get('dominant_emotion', 'neutral')
                                         st.write(f"**Emotion:** {emotion}")
+
+                                        st.markdown("<br>", unsafe_allow_html=True) # Adds a small vertical space
+                                        digression_score = context_data.get('digression_score', 0)
+                                        if digression_score > 0.0:
+                                            st.write(f"**Digression:** {digression_score:.1%}")
                                     
                                     with col2:
                                         interest = context_data.get('interest_level', 0)
@@ -803,7 +809,7 @@ class ChatInterface:
                                         sarcasm_conf = context_data.get('sarcasm_confidence', 0)
                                         if sarcasm_conf > 0.0:
                                             st.write(f"**Sarcasm:** {sarcasm_conf:.1%}")
-                
+                    
                 st.divider()
     
     def render_message_input(self, on_message_submit: Callable[[str], None]):

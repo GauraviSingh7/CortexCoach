@@ -50,7 +50,7 @@ class MultimodalContext:
     sarcasm_detected: bool
     sarcasm_confidence: float
     interest_level: float  # 0-1 scale
-    digression_detected: bool
+    digression_score: float
     
     # Contextual metadata
     conversation_turn: int
@@ -64,7 +64,7 @@ class CoachingRAGSystem:
     def __init__(self, gemini_api_key: str, chroma_persist_dir: str = "./chroma_db"):
         # Initialize Gemini
         genai.configure(api_key=gemini_api_key)
-        self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
+        self.gemini_model = genai.GenerativeModel('gemini-2.5-flash-lite-preview-06-17')
         
         # Initialize ChromaDB
         self.chroma_client = chromadb.PersistentClient(
@@ -237,6 +237,9 @@ class CoachingRAGSystem:
         phase = context.grow_phase
         context.system_instruction = self.get_phase_prompt(phase)
 
+        context.digression_score = self.evaluate_digression_score(context.utterance, phase)
+        logger.info(f"Calculated digression score: {context.digression_score}")
+
         if phase == GROWPhase.GOAL:
             context.goal_clarity_score = self.evaluate_goal_clarity(context.utterance)
             
@@ -283,6 +286,7 @@ CURRENT SITUATION:
 - Sarcasm Detected: {context.sarcasm_detected}
 - Conversation Turn: {context.conversation_turn}
 - Goal Clarity Score: {context.goal_clarity_score}/1.0
+- Digression Score: {context.digression_score}/1.0
 
 RELEVANT COACHING TEMPLATES:
 {self._format_templates(retrieved_data.get('templates', {}))}
@@ -298,6 +302,8 @@ COACHING GUIDELINES:
 5. If interest is low, use engagement techniques
 6. Keep responses concise but impactful (2-3 sentences max)
 7. Ask one powerful coaching question to move the conversation forward
+8. **If the digression_score is high (above 0.5), your primary task is to steer the user back.** Briefly acknowledge their comment (e.g., "I see," or "Thanks for sharing,"), then immediately pivot back to the coaching topic.
+9. **CRITICAL: Do NOT engage with the user's off-topic subject.** Do not ask questions about it or discuss it further. Your sole focus must be returning to the coaching phase.
 
 Generate a coaching response that is:
 - Empathetic and personalized
@@ -463,7 +469,6 @@ Generate a coaching response that is:
 #################################################################
 
     def query_llm(self, prompt: str) -> str:
-    # Gemini or OpenAI integration
         try:
             response = self.gemini.generate_text(prompt)
             return response.text if hasattr(response, 'text') else response
@@ -493,8 +498,33 @@ Generate a coaching response that is:
             return max(0.0, min(1.0, score))
         except Exception as e:
             logger.error(f"Goal clarity evaluation failed: {e}")
-            return 0.3  # fallback
+            return 0.3
 
+    # ADDED: New function to evaluate digression
+    def evaluate_digression_score(self, user_input: str, phase: GROWPhase) -> float:
+        """Use LLM to score how much the user is digressing from the current GROW phase."""
+        
+        # Get a description of what the current phase is about
+        phase_description = self.get_phase_prompt(phase)
+
+        prompt = f"""You are an expert in conversation analysis for a coaching session. The user is currently in the '{phase.value.upper()}' phase of the GROW model. The goal of this phase is to: "{phase_description}"
+
+Based on the user's latest statement, please rate on a scale from 0.0 (perfectly on-topic) to 1.0 (completely off-topic) how much they are digressing from this phase.
+
+User's Statement: "{user_input}"
+
+Respond with just a number (e.g., 0.1 or 0.9)."""
+        
+        self._rate_limit() # Respect API rate limits
+        try:
+            response = self.gemini_model.generate_content(prompt)
+            score = float(response.text.strip())
+            # Ensure the score is within the 0.0 to 1.0 range
+            return max(0.0, min(1.0, score))
+        except (ValueError, AttributeError, Exception) as e:
+            logger.error(f"Digression score evaluation failed: {e}")
+            # Default to a low score if evaluation fails
+            return 0.1
 
 # Usage Example
 def main():
@@ -524,7 +554,7 @@ def main():
         sarcasm_detected=False,
         sarcasm_confidence=0.1,
         interest_level=0.7,
-        digression_detected=False,
+        digression_detected=0.1,
         
         conversation_turn=1,
         previous_phase_completion=False,
