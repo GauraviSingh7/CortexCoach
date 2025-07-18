@@ -19,13 +19,12 @@ This project aims to build an **AI-driven coaching system** that facilitates str
 | Feature | Status |
 |--------|--------|
 | Transcription + Speaker Diarization | 🔄 In Progress |
-| Emotion Detection (Face) | ✅ Implemented |
+| Emotion Detection (Text) | 🔄 In Progress |
 | Sarcasm and Stress Detection | ✅ Implemented |
-| Topic Tracking & Digression Handling | 🔄 In Progress |
+| Topic Tracking & Digression Handling | ✅ Implemented|
 | PLS Classification | ✅ Implemented |
 | GROW Model Annotation & Phase Tracking | ✅ Implemented |
 | Session Summary Generation | 🔄 Planned |
-| Real-Time Interaction via WebSockets | ✅ Implemented |
 
 ## 🛠️ Tech Stack (to change with progression)
 
