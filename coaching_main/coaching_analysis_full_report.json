@@ -1,0 +1,36 @@
+{
+  "session_id": "70c323b5-ac20-4995-b938-42d19330d690",
+  "duration_minutes": 3.1901930833333334,
+  "participants": {
+    "coach": {
+      "engagement_avg": 0.5,
+      "total_turns": 29.0
+    },
+    "coachee": {
+      "engagement_avg": 0.5,
+      "total_turns": 30.0
+    }
+  },
+  "grow_phases": [],
+  "emotional_journey": {
+    "coach": [],
+    "coachee": []
+  },
+  "learning_style_analysis": {
+    "visual": 0.33,
+    "auditory": 0.33,
+    "kinesthetic": 0.34
+  },
+  "key_insights": [
+    "Session completed with 59 total interactions"
+  ],
+  "coaching_effectiveness": {
+    "overall": 0.5,
+    "questioning": 0.5,
+    "listening": 0.5
+  },
+  "recommendations": [
+    "Continue coaching sessions for better insights"
+  ],
+  "transcript_summary": "Session with 29 coach turns and 30 coachee turns"
+}
