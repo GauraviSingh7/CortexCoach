@@ -1,0 +1,137 @@
+# ==========================================
+# Python
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+observer/
+
+# ==========================================
+# Environment Variables / Secrets
+# ==========================================
+.env
+.env.*
+!.env.example
+
+# ==========================================
+# Build / Distribution
+# ==========================================
+.Python
+build/
+dist/
+downloads/
+develop-eggs/
+eggs/
+.eggs/
+sdist/
+wheels/
+*.egg-info/
+*.egg
+MANIFEST
+
+# ==========================================
+# Testing / Coverage
+# ==========================================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.cache/
+coverage.xml
+
+# ==========================================
+# Jupyter
+# ==========================================
+.ipynb_checkpoints/
+
+# ==========================================
+# IDEs
+# ==========================================
+.vscode/
+.idea/
+.spyderproject
+.spyproject
+.ropeproject
+
+# ==========================================
+# Type Checkers / Linters
+# ==========================================
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+
+# ==========================================
+# Logs
+# ==========================================
+*.log
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ==========================================
+# Databases / Local Storage
+# ==========================================
+.chromadb/
+*.sqlite3
+*.db
+
+# ==========================================
+# Reports / Generated Outputs
+# ==========================================
+reports/
+coaching_analysis_full_report.json
+coaching_report_wav_test.json
+
+# ==========================================
+# Audio Files
+# ==========================================
+*.wav
+
+# Uncomment if you don't want any audio in git
+# recordings/
+# uploads/
+
+# ==========================================
+# OS Files
+# ==========================================
+.DS_Store
+Thumbs.db
+
+# ==========================================
+# Claude / Cursor
+# ==========================================
+.claude/
+.cursorignore
+.cursorindexingignore
+
+# ==========================================
+# Project-Specific
+# ==========================================
+portaudio/
+pa_stable_v190700_20210406.tgz
+
+# ==========================================
+# Local Runtime Files
+# ==========================================
+instance/
+.webassets-cache
+celerybeat-schedule
+celerybeat.pid
+
+# ==========================================
+# Optional: Large Model Files
+# ==========================================
+# Uncomment if models are downloaded separately
+# *.pth
+# *.pkl
+# *.safetensors
