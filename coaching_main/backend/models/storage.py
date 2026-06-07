@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from dataclasses import asdict
 from typing import Dict, List
@@ -47,12 +48,17 @@ class ChromaDBStorage:
 
     async def store_session_report(self, report: SessionReport):
         """Store final session report summary & metadata"""
+        # SessionReport is a Pydantic model; flatten nested dicts/lists to JSON
+        # strings since ChromaDB metadata only accepts scalar values.
+        raw = report.model_dump()
+        metadata = {k: (v if isinstance(v, (str, int, float, bool)) else json.dumps(v, default=str))
+                    for k, v in raw.items()}
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None,
             lambda: self.sessions_collection.add(
                 documents=[report.transcript_summary],
-                metadatas=[asdict(report)],
+                metadatas=[metadata],
                 ids=[report.session_id],
             ),
         )

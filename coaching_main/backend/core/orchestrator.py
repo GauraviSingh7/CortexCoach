@@ -19,6 +19,7 @@ from backend.models.enhanced_local_analyzer import EnhancedLocalAnalyzer
 from backend.models.contextual_suggestion_engine import ContextualSuggestionEngine
 from backend.schemas.data_models import AudioChunk, RealTimeFeedback, GROWPhase, SessionReport
 from backend.models.sarcasm_detector import SarcasmDetector
+from backend.models.storage import ChromaDBStorage
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,11 @@ class CoachingObserverSystem:
         self.inference_engine = ModelInferenceEngine()
         self.gemini_analyzer = GeminiAnalyzer(gemini_key) if gemini_key else None
         self.sarcasm_detector = SarcasmDetector()
+        try:
+            self.storage = ChromaDBStorage()
+        except Exception as e:
+            logger.warning(f"ChromaDB storage unavailable: {e}")
+            self.storage = None
         
         # Enhanced analyzers
         self.local_analyzer = EnhancedLocalAnalyzer()
@@ -940,8 +946,11 @@ Provide ONE specific, actionable suggestion (max 15 words)."""
         return report
 
     async def _store_session(self, report):
-        """Store session data"""
-        pass
+        """Persist final session report to ChromaDB."""
+        if not self.storage:
+            return
+        await self.storage.store_session_report(report)
+        logger.info(f"💾 Stored session {report.session_id} in ChromaDB")
 
     def _generate_basic_report(self, report_data: Dict[str, Any]) -> SessionReport:
         """Generate basic report fallback"""
