@@ -140,10 +140,23 @@ def start_session():
             )
             if response.status_code == 200:
                 data = response.json()
+                # Wipe all prior-session UI state so a new session starts clean.
+                # No insights/recommendations/transcripts/metric chips from the
+                # previous session may bleed into this one.
+                st.session_state.pop('final_report', None)
+                st.session_state.feedback_data = []
+                st.session_state.transcript_history = []
+                st.session_state.current_utterances = {'coach': '', 'coachee': ''}
+                st.session_state.current_grow_phase = "Uncertain"
+                st.session_state.current_engagement = 0.0
+                st.session_state.current_learning_style = "Unknown"
+                st.session_state.current_digression = 0.0
+                st.session_state.current_sarcasm = 0.0
+                st.session_state.sarcasm_detected = False
+
                 st.session_state.session_id = data["session_id"]
                 st.session_state.session_active = True
-                st.session_state.feedback_data = []
-                
+
                 # Connect WebSocket
                 if not st.session_state.ws_client.connected:
                     if st.session_state.ws_client.connect():
@@ -484,14 +497,15 @@ def render_live_transcript_compact():
                 f'</div>',
                 unsafe_allow_html=True
             )
-            # Finalized messages (most recent last — natural reading order)
-            cards = "".join(_utterance_card(m) for m in msgs[-15:])
-            # Live streaming bubble
+            # Newest-first: streaming bubble (in-progress utterance) on top,
+            # then finalized messages reversed so the most recent appears next.
+            cards = ""
             if live_text:
                 cards += _utterance_card(
                     {'speaker': speaker, 'transcript': live_text},
                     streaming=True
                 )
+            cards += "".join(_utterance_card(m) for m in reversed(msgs[-15:]))
             if not cards:
                 cards = '<div style="color:#aaa;text-align:center;padding:20px;font-size:13px;">Waiting…</div>'
             st.html(f'<div style="max-height:520px;overflow-y:auto;padding:4px;">{cards}</div>')
@@ -544,41 +558,41 @@ def render_analytics_dashboard():
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        fig = px.line(df, x='timestamp', y='engagement_score', color='speaker', 
+        fig = px.line(df, x='timestamp', y='engagement_score', color='speaker',
                      title='Engagement Over Time',
                      color_discrete_map={'coach': '#1f77b4', 'coachee': '#ff7f0e'})
         fig.update_layout(height=300)
-        st.plotly_chart(fig, width="stretch")
-    
+        st.plotly_chart(fig, width="stretch", key="engagement_line")
+
     with col2:
         fig = px.line(df, x='timestamp', y='focus_score',
                      title='Topic Focus (Higher = Better)',
                      color_discrete_sequence=['#2ca02c'])
-        fig.add_hline(y=0.7, line_dash="dash", line_color="green", 
+        fig.add_hline(y=0.7, line_dash="dash", line_color="green",
                      annotation_text="Good Focus")
         fig.update_layout(height=300)
-        st.plotly_chart(fig, width="stretch")
-    
+        st.plotly_chart(fig, width="stretch", key="focus_line")
+
     with col3:
         # NEW: Sarcasm tracking
         if 'sarcasm_score' in df.columns:
             fig = px.line(df, x='timestamp', y='authenticity_score',
                          title='Tone Authenticity (Higher = Better)',
                          color_discrete_sequence=['#9467bd'])
-            fig.add_hline(y=0.7, line_dash="dash", line_color="green", 
+            fig.add_hline(y=0.7, line_dash="dash", line_color="green",
                          annotation_text="Authentic")
-            fig.add_hline(y=0.4, line_dash="dash", line_color="orange", 
+            fig.add_hline(y=0.4, line_dash="dash", line_color="orange",
                          annotation_text="Possibly Sarcastic")
             fig.update_layout(height=300)
-            st.plotly_chart(fig, width="stretch")
-    
+            st.plotly_chart(fig, width="stretch", key="authenticity_line")
+
     with col4:
         avg_engagement = df.groupby('speaker')['engagement_score'].mean()
         fig = px.bar(x=avg_engagement.index, y=avg_engagement.values,
                     title='Avg Engagement by Speaker', color=avg_engagement.index,
                     color_discrete_map={'coach': '#1f77b4', 'coachee': '#ff7f0e'})
         fig.update_layout(height=300)
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, width="stretch", key="avg_engagement_bar")
 
 def render_grow_phases():
     """Render GROW model phase tracking"""
@@ -607,16 +621,16 @@ def render_grow_phases():
     
     with col1:
         phase_counts = df_grow['phase'].value_counts()
-        fig = px.pie(values=phase_counts.values, names=phase_counts.index, 
+        fig = px.pie(values=phase_counts.values, names=phase_counts.index,
                     title='GROW Phase Distribution')
-        st.plotly_chart(fig, width="stretch")
-    
+        st.plotly_chart(fig, width="stretch", key="grow_pie")
+
     with col2:
         fig = px.scatter(df_grow, x='timestamp', y='phase', size='confidence',
                         title='GROW Phase Timeline', color='confidence',
                         color_continuous_scale='Viridis')
         fig.update_layout(height=400)
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, width="stretch", key="grow_timeline")
 
 def render_emotion_tracking():
     """Render emotion tracking visualization"""
@@ -649,12 +663,17 @@ def render_emotion_tracking():
     fig = px.line(df_emotions, x='timestamp', y='score', color='emotion',
                  facet_col='speaker', title='Emotional Trends Over Time')
     fig.update_layout(height=400)
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, width="stretch", key="emotion_facets")
 
 def render_session_report():
     """Render final session report"""
     st.header("📋 Session Report")
-    
+
+    # Never render a report while a new session is in progress — even if a
+    # stale final_report somehow lingers, the live view owns the screen.
+    if st.session_state.session_active:
+        return
+
     if 'final_report' not in st.session_state:
         st.info("Complete a session to generate a report...")
         return
