@@ -17,10 +17,27 @@ logger = logging.getLogger(__name__)
 class GeminiAnalyzer:
     """Handles AI-powered analysis using Google Gemini"""
 
+    # Requires google-generativeai>=0.8.0 for `gemini-2.5-flash`.
+    # Fallback chain handles older SDKs that only know gemini-1.5-* names.
+    _MODEL_CANDIDATES = ("gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro")
+
     def __init__(self, api_key: str):
-        genai.configure(api_key=api_key)
-        # Use the updated model name (gemini-1.5-pro or gemini-1.5-flash)
-        self.model = genai.GenerativeModel('gemini-2.5-flash')  # Changed from gemini-pro
+        self.model = None
+        try:
+            genai.configure(api_key=api_key)
+        except Exception as e:
+            logger.warning(f"Gemini configure() failed: {e}. Gemini disabled.")
+            return
+
+        for candidate in self._MODEL_CANDIDATES:
+            try:
+                self.model = genai.GenerativeModel(candidate)
+                logger.info(f"✅ Gemini model initialized: {candidate}")
+                break
+            except Exception as e:
+                logger.warning(f"Gemini model '{candidate}' unavailable ({e}); trying next.")
+        if not self.model:
+            logger.warning("⚠️ No compatible Gemini model found — falling back to local analyzer.")
         
     def _parse_gemini_json(self, raw_text: str) -> dict:
         """
@@ -102,6 +119,9 @@ Provide feedback as JSON with this structure:
 
 Return ONLY the JSON, no markdown formatting."""
 
+        if not self.model:
+            raise RuntimeError("Gemini model not available")
+
         try:
             response = await self.model.generate_content_async(prompt)
             feedback_dict = self._parse_gemini_json(response.text)
@@ -172,6 +192,9 @@ Generate a report with this EXACT JSON structure (no markdown, no code blocks):
 }}
 
 Return ONLY valid JSON without any markdown formatting or code blocks."""
+
+        if not self.model:
+            raise RuntimeError("Gemini model not available")
 
         try:
             response = await self.model.generate_content_async(prompt)

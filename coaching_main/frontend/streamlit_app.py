@@ -11,6 +11,7 @@ import websocket
 import json
 import threading
 import time
+import html
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -292,7 +293,7 @@ def render_live_stats_banner():
     
     with col1:
         phase = st.session_state.current_grow_phase
-        phase_emoji = {"Goal": "🎯", "Reality": "🔍", "Options": "💡", "Way Forward": "🚀"}.get(phase, "📍")
+        phase_emoji = {"Goal": "🎯", "Reality": "🔍", "Options": "💡", "Way Forward": "🚀", "Uncertain": "❓"}.get(phase, "📍")
         st.metric("GROW Phase", f"{phase_emoji} {phase}", help="Current phase in GROW model")
     
     with col2:
@@ -418,7 +419,9 @@ def render_real_time_feedback():
 def _utterance_card(msg: dict, streaming: bool = False) -> str:
     """Return an HTML card for one finalized (or in-progress) utterance."""
     ts        = datetime.fromtimestamp(msg['timestamp']).strftime("%H:%M:%S") if 'timestamp' in msg else ""
-    transcript = msg.get('transcript', '—')
+    # Escape user-facing text before interpolation — transcripts can contain
+    # `<`, `>`, `&` which would otherwise break the surrounding HTML layout.
+    transcript = html.escape(msg.get('transcript', '—'))
     digression = msg.get('digression_level', 0.0)
     sarcasm    = msg.get('sarcasm_score', 0.0)
     speaker    = msg.get('speaker', 'coach')
@@ -662,13 +665,51 @@ def render_session_report():
     st.write(f"Duration: {report.get('duration_minutes', 0):.1f} minutes")
     
     col1, col2, col3 = st.columns(3)
-    
+
+    eff = report.get('coaching_effectiveness') or {}
+    def _fmt(metric_key):
+        v = eff.get(metric_key)
+        return f"{v:.2f}" if isinstance(v, (int, float)) and v > 0 else "Not Available"
+
     with col1:
-        st.metric("Overall Effectiveness", f"{report.get('coaching_effectiveness', {}).get('overall', 0):.2f}")
+        st.metric("Overall Effectiveness", _fmt('overall'))
     with col2:
-        st.metric("Questioning Quality", f"{report.get('coaching_effectiveness', {}).get('questioning', 0):.2f}")
+        st.metric("Questioning Quality", _fmt('questioning'))
     with col3:
-        st.metric("Listening Quality", f"{report.get('coaching_effectiveness', {}).get('listening', 0):.2f}")
+        st.metric("Listening Quality", _fmt('listening'))
+
+    # Surface the wired-in sarcasm & digression rollups
+    sarc = report.get('sarcasm_summary') or {}
+    dig  = report.get('digression_summary') or {}
+    if sarc or dig:
+        st.subheader("🔎 Conversation Signals")
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            if sarc:
+                st.write(f"**Sarcasm detected:** {sarc.get('count_detected', 0)} of {sarc.get('total_evaluated', 0)} turns "
+                         f"(avg score {sarc.get('average_score', 0):.2f}, peak {sarc.get('max_score', 0):.2f})")
+                if sarc.get('by_type'):
+                    st.write("Types: " + ", ".join(f"{k}={v}" for k, v in sarc['by_type'].items()))
+            else:
+                st.write("**Sarcasm:** Not Available")
+        with sc2:
+            if dig:
+                st.write(f"**Off-topic moments:** {dig.get('off_topic_moments', 0)} of {dig.get('total_evaluated', 0)} turns "
+                         f"(avg {dig.get('average_score', 0):.2f}, peak {dig.get('max_score', 0):.2f})")
+            else:
+                st.write("**Digression:** Not Available")
+
+    # Learning style (real VAK if available, else "Insufficient Data")
+    vak = report.get('learning_style_analysis') or {}
+    if vak:
+        st.subheader("👁️👂✋ Learning Style (VAK)")
+        v1, v2, v3 = st.columns(3)
+        v1.metric("Visual", f"{vak.get('visual', 0):.0%}")
+        v2.metric("Auditory", f"{vak.get('auditory', 0):.0%}")
+        v3.metric("Kinesthetic", f"{vak.get('kinesthetic', 0):.0%}")
+    else:
+        st.subheader("👁️👂✋ Learning Style (VAK)")
+        st.info("Insufficient Data")
     
     st.subheader("🔍 Key Insights")
     for insight in report.get('key_insights', []):

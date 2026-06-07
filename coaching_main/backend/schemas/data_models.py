@@ -57,3 +57,5 @@ class SessionReport(BaseModel):
     coaching_effectiveness: Dict[str, float]
     recommendations: List[str]
     transcript_summary: str
+    sarcasm_summary: Dict[str, Any] = {}
+    digression_summary: Dict[str, Any] = {}

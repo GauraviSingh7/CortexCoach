@@ -5,6 +5,7 @@ import asyncio
 import logging
 import threading
 from datetime import datetime
+from typing import Optional
 import assemblyai as aai
 from assemblyai.streaming.v3 import (
     StreamingClient,
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 class AudioProcessor:
     """Handles real-time audio processing with AssemblyAI (streaming.v3 API)"""
 
-    def __init__(self, api_key: str, default_coach_role: bool = True):
+    def __init__(self, api_key: str, default_coach_role: bool = True, coach_speaker_id: Optional[str] = None):
         self.api_key = api_key
         self.client: StreamingClient | None = None
         self.session_active = False
@@ -32,6 +33,12 @@ class AudioProcessor:
         self.event_loop: asyncio.AbstractEventLoop | None = None
         self.stream_thread = None
         self.default_coach_role = default_coach_role
+        # Optional override: caller may pin which AssemblyAI speaker id is the coach
+        # (e.g. "A" or "SPEAKER_A"). When set, the heuristic is bypassed.
+        self.coach_speaker_id: Optional[str] = None
+        if coach_speaker_id:
+            normalized = coach_speaker_id.upper()
+            self.coach_speaker_id = normalized if normalized.startswith("SPEAKER_") else f"SPEAKER_{normalized}"
         # Maps AssemblyAI speaker_id (e.g. "SPEAKER_A") to role ("coach"/"coachee")
         # Locked on first classification so same voice keeps same label all session
         self._speaker_map: dict[str, str] = {}
@@ -138,15 +145,30 @@ class AudioProcessor:
         is_final   = bool(getattr(event, "end_of_turn", True))
         duration   = getattr(event, "audio_duration_seconds", 2.0)
 
-        if speaker_id and speaker_id in self._speaker_map:
-            speaker_label = self._speaker_map[speaker_id]
+        # Prefer AssemblyAI diarization: assign roles by ORDER of appearance,
+        # not by pronoun heuristics. Heuristic is only used when AssemblyAI
+        # gives no speaker_id at all.
+        if speaker_id:
+            if speaker_id not in self._speaker_map and is_final:
+                # Explicit override from session start takes precedence.
+                if self.coach_speaker_id and speaker_id == self.coach_speaker_id:
+                    self._speaker_map[speaker_id] = "coach"
+                elif self.coach_speaker_id:
+                    self._speaker_map[speaker_id] = "coachee"
+                else:
+                    # Order-based assignment: first distinct voice → coach,
+                    # second → coachee. Third+ falls back to heuristic.
+                    existing_roles = set(self._speaker_map.values())
+                    if "coach" not in existing_roles:
+                        self._speaker_map[speaker_id] = "coach"
+                    elif "coachee" not in existing_roles:
+                        self._speaker_map[speaker_id] = "coachee"
+                    else:
+                        self._speaker_map[speaker_id] = self._detect_speaker(transcript_text)
+                logger.info(f"🔒 Locked speaker mapping: {speaker_id} → {self._speaker_map[speaker_id]}")
+            speaker_label = self._speaker_map.get(speaker_id) or self._detect_speaker(transcript_text)
         else:
             speaker_label = self._detect_speaker(transcript_text)
-            # Only lock the mapping once we have a final utterance — partials
-            # may have too little text for a reliable heuristic classification.
-            if speaker_id and is_final:
-                self._speaker_map[speaker_id] = speaker_label
-                logger.info(f"🔒 Locked speaker mapping: {speaker_id} → {speaker_label}")
 
         chunk = AudioChunk(
             timestamp=datetime.now().timestamp(),

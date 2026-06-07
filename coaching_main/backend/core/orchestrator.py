@@ -112,8 +112,11 @@ class CoachingObserverSystem:
                 asyncio.create_task(self.file_processor.process_file(file_path, self.audio_queue))
 
             else:
-                self.audio_processor = AudioProcessor(self.assemblyai_key)
-                
+                self.audio_processor = AudioProcessor(
+                    self.assemblyai_key,
+                    coach_speaker_id=coach_speaker_id
+                )
+
                 await self.audio_processor.start_live_transcription(
                     self.audio_queue,
                     device_index=device_index
@@ -174,8 +177,9 @@ class CoachingObserverSystem:
             # Run ML inference
             inferences = await self.inference_engine.process_chunk(chunk)
             
-            # ENHANCED: If emotion is neutral, use text analysis
-            if inferences.emotion.get('neutral', 0) > 0.6:
+            # Only invoke text-based fallback when the emotion model produced nothing.
+            # Empty dict → "Not Available"; never synthesize a neutral default.
+            if not inferences.emotion:
                 text_emotions = self._analyze_emotion_from_text(chunk.transcript)
                 if text_emotions:
                     inferences.emotion = text_emotions
@@ -649,11 +653,12 @@ class CoachingObserverSystem:
             elif raw_score >= 2:
                 confidence = 0.6
             else:
-                phase = "Reality"
-                confidence = 0.4
-            
+                # No evidence — do NOT default to Reality.
+                phase = "Uncertain"
+                confidence = 0.0
+
             reasoning = f"Detected {raw_score} phase indicators"
-            
+
             return GROWPhase(
                 phase=phase,
                 confidence=confidence,
@@ -661,24 +666,32 @@ class CoachingObserverSystem:
             )
         except Exception as e:
             logger.error(f"GROW analysis error: {e}")
-            return GROWPhase(phase="Reality", confidence=0.3, reasoning="Error in analysis")
+            return GROWPhase(phase="Uncertain", confidence=0.0, reasoning="Error in analysis")
 
     async def _assess_coaching_quality(self, chunk: AudioChunk, inferences, grow_phase: GROWPhase) -> Dict[str, float]:
-        """Assess coaching quality metrics"""
+        """Assess coaching quality metrics — evidence-only, coach turns only."""
         try:
+            # Coaching quality is only meaningful for coach utterances.
+            if chunk.speaker != "coach":
+                return {}
+
             transcript_lower = chunk.transcript.lower()
-            
-            questioning_score = 0.7
+
+            # Score only from observed evidence; no inflated baselines.
+            questioning_score = 0.0
             if "?" in chunk.transcript:
                 if any(word in transcript_lower for word in ["what", "how", "why", "tell me"]):
                     questioning_score = 0.9
-            
-            listening_score = 0.6
-            if any(word in transcript_lower for word in ["understand", "hear", "sounds like"]):
+                else:
+                    questioning_score = 0.5  # closed question observed
+
+            listening_score = 0.0
+            if any(word in transcript_lower for word in ["understand", "hear", "sounds like", "i see", "got it", "tell me more", "go on"]):
                 listening_score = 0.85
-            
-            overall = (questioning_score + listening_score + grow_phase.confidence) / 3
-            
+
+            components = [s for s in (questioning_score, listening_score, grow_phase.confidence) if s > 0]
+            overall = sum(components) / len(components) if components else 0.0
+
             return {
                 "overall": overall,
                 "questioning": questioning_score,
@@ -686,7 +699,7 @@ class CoachingObserverSystem:
             }
         except Exception as e:
             logger.error(f"Quality assessment error: {e}")
-            return {"overall": 0.5, "questioning": 0.5, "listening": 0.5}
+            return {}
 
     async def _generate_suggestions(self, chunk: AudioChunk, inferences, grow_phase: GROWPhase, sarcasm_result: Dict = None) -> list:
         """Generate coaching suggestions - WITH SARCASM AWARENESS"""
@@ -720,7 +733,7 @@ class CoachingObserverSystem:
             
             # Optional: Gemini AI enhancement
             chunk_count = len(self.session_data["chunks"])
-            if (chunk_count % 5 == 0) and chunk.speaker == "coach" and self.gemini_analyzer:
+            if (chunk_count % 5 == 0) and chunk.speaker == "coach" and self.gemini_analyzer and self.gemini_analyzer.model:
                 try:
                     context = "\n".join([f"{c.speaker}: {c.transcript}" for c in conversation_history[-5:]])
                     prompt = f"""You are an expert coaching advisor. Based on this conversation, give ONE brief, actionable suggestion for the coach.
@@ -860,7 +873,10 @@ Provide ONE specific, actionable suggestion (max 15 words)."""
                 'session_id': self.session_id,
                 'duration': (datetime.now() - self.session_data["start_time"]).total_seconds() / 60,
                 'chunks': self.session_data["chunks"],
-                'feedback_history': self.session_data.get("feedback_history", [])
+                'feedback_history': self.session_data.get("feedback_history", []),
+                'vak_scores': self.session_data.get("vak_scores", []),
+                'sarcasm_detections': self.session_data.get("sarcasm_detections", []),
+                'digression_scores': self.session_data.get("digression_scores", [])
             }
             
             gemini_succeeded = False
@@ -937,19 +953,15 @@ Provide ONE specific, actionable suggestion (max 15 words)."""
             session_id=report_data.get('session_id', 'unknown'),
             duration_minutes=report_data.get('duration', 0),
             participants={
-                "coach": {"engagement_avg": 0.5, "total_turns": len(coach_chunks)},
-                "coachee": {"engagement_avg": 0.5, "total_turns": len(coachee_chunks)}
+                "coach": {"engagement_avg": 0.0, "total_turns": len(coach_chunks)},
+                "coachee": {"engagement_avg": 0.0, "total_turns": len(coachee_chunks)}
             },
             grow_phases=[],
             emotional_journey={"coach": [], "coachee": []},
-            learning_style_analysis={"visual": 0.33, "auditory": 0.33, "kinesthetic": 0.34},
+            learning_style_analysis={},
             key_insights=[f"Session completed with {len(chunks)} total interactions"],
-            coaching_effectiveness={
-                "overall": 0.5,
-                "questioning": 0.5,
-                "listening": 0.5
-            },
-            recommendations=["Continue coaching sessions for better insights"],
+            coaching_effectiveness={},
+            recommendations=["Insufficient data for recommendations"],
             transcript_summary=f"Session with {len(coach_chunks)} coach turns and {len(coachee_chunks)} coachee turns"
         )
 
