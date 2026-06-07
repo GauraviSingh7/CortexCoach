@@ -45,13 +45,16 @@ class EnhancedLocalAnalyzer:
         """Generate a comprehensive coaching report"""
         chunks = session_data.get('chunks', [])
         feedback_history = session_data.get('feedback_history', [])
-        
+        vak_scores = session_data.get('vak_scores', [])
+        sarcasm_detections = session_data.get('sarcasm_detections', [])
+        digression_scores = session_data.get('digression_scores', [])
+
         if not chunks:
             return self._empty_report(session_data)
-        
+
         # Analyze conversation
         analysis = self._analyze_conversation(chunks, feedback_history)
-        
+
         # Build comprehensive report
         return {
             'session_id': session_data.get('session_id', 'unknown'),
@@ -59,11 +62,13 @@ class EnhancedLocalAnalyzer:
             'participants': self._analyze_participants(chunks, feedback_history),
             'grow_phases': self._analyze_grow_distribution(feedback_history),
             'emotional_journey': self._analyze_emotional_journey(chunks, feedback_history),
-            'learning_style_analysis': self._analyze_learning_styles(feedback_history),
+            'learning_style_analysis': self._analyze_learning_styles(vak_scores),
             'key_insights': self._generate_key_insights(analysis, chunks),
             'coaching_effectiveness': self._analyze_coaching_effectiveness(analysis),
             'recommendations': self._generate_recommendations(analysis),
-            'transcript_summary': self._generate_summary(analysis, chunks)
+            'transcript_summary': self._generate_summary(analysis, chunks),
+            'sarcasm_summary': self._summarize_sarcasm(sarcasm_detections),
+            'digression_summary': self._summarize_digression(digression_scores)
         }
     
     def _analyze_conversation(self, chunks: List, feedback_history: List) -> Dict[str, Any]:
@@ -245,27 +250,30 @@ class EnhancedLocalAnalyzer:
         }
     
     def _analyze_grow_distribution(self, feedback_history: List) -> List[Dict]:
-        """Analyze GROW phase distribution"""
+        """Analyze GROW phase distribution.
+
+        Uncertain turns are reported separately so they don't inflate any of
+        the four real GROW phase counts.
+        """
         if not feedback_history:
             return []
-        
+
         phase_durations = Counter()
         phase_confidences = {}
-        
+
         for feedback in feedback_history:
             phase = feedback.grow_phase.phase
             phase_durations[phase] += 1
-            
-            if phase not in phase_confidences:
-                phase_confidences[phase] = []
-            phase_confidences[phase].append(feedback.grow_phase.confidence)
-        
-        total = sum(phase_durations.values())
-        
+            phase_confidences.setdefault(phase, []).append(feedback.grow_phase.confidence)
+
+        # Total uses ONLY the four classified phases for the percentage base.
+        classified_total = sum(c for p, c in phase_durations.items() if p != "Uncertain")
+        base = classified_total or sum(phase_durations.values())
+
         return [
             {
                 'phase': phase,
-                'percentage': (count / total) * 100,
+                'percentage': (count / base) * 100 if base else 0.0,
                 'avg_confidence': sum(phase_confidences[phase]) / len(phase_confidences[phase])
             }
             for phase, count in phase_durations.most_common()
@@ -295,12 +303,52 @@ class EnhancedLocalAnalyzer:
             'coachee': coachee_emotions
         }
     
-    def _analyze_learning_styles(self, feedback_history: List) -> Dict[str, float]:
-        """Aggregate learning style preferences"""
-        if not feedback_history:
-            return {'visual': 0.33, 'auditory': 0.33, 'kinesthetic': 0.34}
-        
-        return {'visual': 0.33, 'auditory': 0.33, 'kinesthetic': 0.34}
+    def _analyze_learning_styles(self, vak_scores: List[Dict]) -> Dict[str, float]:
+        """Average the per-chunk VAK results actually computed during the session.
+
+        Returns {} when no scored chunks exist — caller should render as
+        "Insufficient Data" rather than a uniform 0.33/0.33/0.34.
+        """
+        usable = [v for v in (vak_scores or []) if isinstance(v, dict) and v.get('confidence', 0) > 0]
+        if not usable:
+            return {}
+
+        v_sum = sum(float(v.get('visual', 0.0)) for v in usable)
+        a_sum = sum(float(v.get('auditory', 0.0)) for v in usable)
+        k_sum = sum(float(v.get('kinesthetic', 0.0)) for v in usable)
+        n = len(usable)
+        return {
+            'visual': v_sum / n,
+            'auditory': a_sum / n,
+            'kinesthetic': k_sum / n
+        }
+
+    def _summarize_sarcasm(self, detections: List[Dict]) -> Dict[str, Any]:
+        """Roll up per-chunk sarcasm data into a report summary."""
+        if not detections:
+            return {}
+        sarcastic = [d for d in detections if d.get('score', 0) > 0.4]
+        scores = [d.get('score', 0.0) for d in detections]
+        type_counts = Counter(d.get('type', 'none') for d in sarcastic)
+        return {
+            'count_detected': len(sarcastic),
+            'total_evaluated': len(detections),
+            'average_score': sum(scores) / len(scores) if scores else 0.0,
+            'max_score': max(scores) if scores else 0.0,
+            'by_type': dict(type_counts)
+        }
+
+    def _summarize_digression(self, scores: List[float]) -> Dict[str, Any]:
+        """Roll up per-chunk digression scores into a report summary."""
+        if not scores:
+            return {}
+        off_topic = [s for s in scores if s > 0.5]
+        return {
+            'average_score': sum(scores) / len(scores),
+            'max_score': max(scores),
+            'off_topic_moments': len(off_topic),
+            'total_evaluated': len(scores)
+        }
     
     def _generate_key_insights(self, analysis: Dict, chunks: List) -> List[str]:
         """Generate key insights from analysis"""
@@ -529,7 +577,9 @@ class EnhancedLocalAnalyzer:
             'emotional_journey': {'coach': [], 'coachee': []},
             'learning_style_analysis': {},
             'key_insights': ['No conversation data available'],
-            'coaching_effectiveness': {'overall': 0.0, 'questioning': 0.0, 'listening': 0.0},
+            'coaching_effectiveness': {},
             'recommendations': ['Record a coaching session to receive insights'],
-            'transcript_summary': 'No data recorded'
+            'transcript_summary': 'No data recorded',
+            'sarcasm_summary': {},
+            'digression_summary': {}
         }

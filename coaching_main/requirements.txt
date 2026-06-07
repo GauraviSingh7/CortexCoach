@@ -10,7 +10,7 @@ numpy==1.26.4
 websockets>=11.0  # For WebSocket support (if needed)
 
 # AI/ML Models
-google-generativeai==0.3.1
+google-generativeai>=0.8.0  # required for gemini-2.5-flash; older versions only support gemini-1.5-*
 torch==2.9.0
 torchaudio==2.9.0
 transformers==4.35.0

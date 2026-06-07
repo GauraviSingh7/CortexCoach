@@ -243,10 +243,10 @@ class ModelInferenceEngine:
                     results[task_name] = self._get_fallback_result(task_name)
         
         return ModelInferences(
-            emotion=results.get('emotion', {"neutral": 1.0}),
+            emotion=results.get('emotion', {}),
             interest_level=results.get('interest', 0.5),
             sarcasm_score=results.get('sarcasm', 0.0),
-            vak_style=results.get('vak', {"visual": 0.33, "auditory": 0.33, "kinesthetic": 0.34}),
+            vak_style=results.get('vak', {}),
             digression_score=results.get('digression', 0.0)
         )
     
@@ -254,7 +254,7 @@ class ModelInferenceEngine:
         """Run emotion recognition inference"""
         model = self.models['emotion_recognition']
         if not model:
-            return {"neutral": 1.0}
+            return {}
             
         loop = asyncio.get_event_loop()
         try:
@@ -310,7 +310,7 @@ class ModelInferenceEngine:
         """Run VAK learning style inference"""
         model = self.models['vak_inference']
         if not model:
-            return {"visual": 0.33, "auditory": 0.33, "kinesthetic": 0.34}
+            return {}
             
         loop = asyncio.get_event_loop()
         try:
@@ -331,10 +331,10 @@ class ModelInferenceEngine:
     def _get_fallback_result(self, task_name: str) -> Any:
         """Get fallback results when models fail"""
         fallbacks = {
-            'emotion': {"neutral": 0.6, "calm": 0.3, "uncertain": 0.1},
+            'emotion': {},
             'interest': 0.5,
             'sarcasm': 0.0,
-            'vak': {"visual": 0.33, "auditory": 0.33, "kinesthetic": 0.34},
+            'vak': {},
             'digression': 0.1
         }
         return fallbacks.get(task_name, None)

@@ -5,7 +5,7 @@
 Before starting, ensure you have:
 - ✅ Python 3.11+ installed
 - ✅ AssemblyAI API key
-- ✅ Gemini API key
+- ✅ Gemini API key (requires `google-generativeai>=0.8.0` — pinned in requirements.txt for `gemini-2.5-flash` support)
 - ✅ Microphone connected and working
 
 ## Step-by-Step Instructions
