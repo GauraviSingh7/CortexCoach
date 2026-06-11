@@ -285,14 +285,18 @@ class EnhancedLocalAnalyzer:
         coachee_emotions = []
         
         for feedback in feedback_history:
+            # emotion_trend may be {} when the emotion model is unavailable
+            # — skip those points rather than crashing on max() of empty seq.
+            if not feedback.emotion_trend:
+                continue
             dominant_emotion = max(feedback.emotion_trend.items(), key=lambda x: x[1])
-            
+
             emotion_point = {
                 'timestamp': feedback.timestamp,
                 'emotion': dominant_emotion[0],
                 'confidence': dominant_emotion[1]
             }
-            
+
             if feedback.speaker == 'coach':
                 coach_emotions.append(emotion_point)
             else:

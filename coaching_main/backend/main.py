@@ -211,14 +211,27 @@ async def start_file_session(
 
 @app.post("/session/stop")
 async def stop_session():
-    """Stop the current coaching session and generate report"""
+    """Stop the current coaching session and generate report.
+
+    Idempotent: if there is no active session but we already produced a
+    report for the most recent one, return it again instead of 400.
+    Avoids the retry-cascade UX when the frontend times out and re-posts.
+    """
     try:
         if not orchestrator:
             raise HTTPException(status_code=500, detail="System not initialized")
-        
+
         if not orchestrator.session_active:
+            if orchestrator.last_report is not None:
+                logger.info("Stop called with no active session — returning cached last report")
+                return {
+                    "status": "stopped",
+                    "report": orchestrator.last_report.model_dump(),
+                    "report_file": None,
+                    "cached": True
+                }
             raise HTTPException(status_code=400, detail="No active session")
-        
+
         report = await orchestrator.stop_session()
         
         # Save report to file

@@ -14,7 +14,6 @@ import time
 import html
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime
 import queue
 
@@ -185,7 +184,9 @@ def stop_session():
     """Stop the current session and get report"""
     try:
         with st.spinner("Stopping session and generating report..."):
-            response = requests.post(f"{API_BASE_URL}/session/stop", timeout=60)
+            # Generous timeout: first-ever stop can take a while if ChromaDB
+            # hasn't cached its embedding model yet. Subsequent stops are fast.
+            response = requests.post(f"{API_BASE_URL}/session/stop", timeout=180)
             if response.status_code == 200:
                 report = response.json()
                 st.session_state.session_active = False

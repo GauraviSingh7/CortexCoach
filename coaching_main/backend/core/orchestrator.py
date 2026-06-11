@@ -18,7 +18,6 @@ from backend.models.file_audio_processor import FileAudioProcessor
 from backend.models.enhanced_local_analyzer import EnhancedLocalAnalyzer
 from backend.models.contextual_suggestion_engine import ContextualSuggestionEngine
 from backend.schemas.data_models import AudioChunk, RealTimeFeedback, GROWPhase, SessionReport
-from backend.models.sarcasm_detector import SarcasmDetector
 from backend.models.storage import ChromaDBStorage
 
 logger = logging.getLogger(__name__)
@@ -36,7 +35,6 @@ class CoachingObserverSystem:
         self.file_processor: Optional[FileAudioProcessor] = None
         self.inference_engine = ModelInferenceEngine()
         self.gemini_analyzer = GeminiAnalyzer(gemini_key) if gemini_key else None
-        self.sarcasm_detector = SarcasmDetector()
         try:
             self.storage = ChromaDBStorage()
         except Exception as e:
@@ -51,6 +49,9 @@ class CoachingObserverSystem:
         self.session_id: Optional[str] = None
         self.session_active = False
         self.session_data: Dict[str, Any] = {}
+        # Last successfully generated report — returned by /session/stop
+        # retries so the endpoint is idempotent.
+        self.last_report: Optional[SessionReport] = None
         
         # Audio queue for chunks
         self.audio_queue: Optional[asyncio.Queue] = None
@@ -85,7 +86,9 @@ class CoachingObserverSystem:
         
         self.session_id = str(uuid.uuid4())
         self.session_active = True
-        
+        # New session — drop the cached previous report.
+        self.last_report = None
+
         self.session_data = {
             "session_id": self.session_id,
             "start_time": datetime.now(),
@@ -544,45 +547,49 @@ class CoachingObserverSystem:
     
     def _detect_digression(self, chunk: AudioChunk, conversation_history: List[AudioChunk]) -> float:
         """
-        Detect if conversation is going off-topic
-        Returns: 0.0 (on topic) to 1.0 (very digressed)
+        Detect off-topic drift via Jaccard overlap of content words against
+        a rolling topic window of recent turns. Explicit digression markers
+        short-circuit to a high score. Short utterances (backchannels,
+        coaching prompts like "What else?") and early-session turns return
+        0.0 — they cannot be evaluated reliably and previously caused most
+        of the false-positive firings.
         """
-        if len(conversation_history) < 3:
+        # Need enough prior context to build a meaningful topic vocabulary.
+        if len(conversation_history) < 6:
             return 0.0
-        
-        recent = conversation_history[-5:] if len(conversation_history) >= 5 else conversation_history
-        
-        main_topic_keywords = self._extract_topic_keywords(recent[:3])
+
         current_text = chunk.transcript.lower()
-        
-        relevance_score = sum(1 for kw in main_topic_keywords if kw in current_text)
-        
+
+        # High-precision: explicit digression cues.
         digression_phrases = [
             'by the way', 'speaking of', 'that reminds me', 'off topic',
-            'random thought', 'just thinking', 'unrelated', 'anyway',
-            'another thing', 'while we\'re at it', 'oh also'
+            'random thought', 'unrelated', 'change the subject', 'oh also',
+            'on another note', 'totally different'
         ]
-        
-        has_digression_phrase = any(phrase in current_text for phrase in digression_phrases)
-        
-        if has_digression_phrase:
-            digression_score = 0.7
-        elif relevance_score == 0:
-            digression_score = 0.6
-        elif relevance_score == 1:
-            digression_score = 0.3
-        else:
-            digression_score = 0.1
-        
-        if len(recent) >= 2:
-            previous_keywords = self._extract_topic_keywords([recent[-2]])
-            current_keywords = self._extract_topic_keywords([chunk])
-            
-            overlap = len(set(previous_keywords) & set(current_keywords))
-            if overlap == 0 and len(previous_keywords) > 0:
-                digression_score = max(digression_score, 0.5)
-        
-        return min(digression_score, 1.0)
+        if any(phrase in current_text for phrase in digression_phrases):
+            return 0.7
+
+        current_keywords = set(self._extract_topic_keywords([chunk]))
+        # Too few content words to judge — treat as on-topic.
+        if len(current_keywords) < 2:
+            return 0.0
+
+        # Topic vocabulary from the last 10 turns (excluding the current one).
+        topic_window = conversation_history[-11:-1]
+        topic_vocab = set(self._extract_topic_keywords(topic_window))
+        if not topic_vocab:
+            return 0.0
+
+        union = current_keywords | topic_vocab
+        jaccard = len(current_keywords & topic_vocab) / len(union) if union else 0.0
+
+        # Thresholds tuned so normal topic shifts (e.g. Goal → Reality)
+        # don't register as digressions.
+        if jaccard < 0.05:
+            return 0.6
+        if jaccard < 0.15:
+            return 0.3
+        return 0.1
     
     def _extract_topic_keywords(self, chunks: List[AudioChunk]) -> List[str]:
         """Extract main topic keywords from chunks"""
@@ -902,14 +909,28 @@ Provide ONE specific, actionable suggestion (max 15 words)."""
                                 for c in self.session_data["chunks"]
                             ]
                         }),
-                        timeout=30.0
+                        timeout=10.0
                     )
                     
                     if isinstance(gemini_report_dict, dict):
                         report = SessionReport(**gemini_report_dict)
                     else:
                         report = gemini_report_dict
-                    
+
+                    # Gemini doesn't see the wired-in per-chunk metrics; overlay
+                    # them so the final report still reflects collected data.
+                    report.sarcasm_summary = self.local_analyzer._summarize_sarcasm(
+                        session_data_for_report['sarcasm_detections']
+                    )
+                    report.digression_summary = self.local_analyzer._summarize_digression(
+                        session_data_for_report['digression_scores']
+                    )
+                    vak_avg = self.local_analyzer._analyze_learning_styles(
+                        session_data_for_report['vak_scores']
+                    )
+                    if vak_avg:
+                        report.learning_style_analysis = vak_avg
+
                     logger.info("✅ Gemini report generated successfully")
                     gemini_succeeded = True
                     
@@ -936,14 +957,23 @@ Provide ONE specific, actionable suggestion (max 15 words)."""
                 'chunks': []
             })
         
+        # Fire-and-forget persistence — first ChromaDB write downloads an
+        # ONNX embedding model (~80 MB) which would otherwise block the HTTP
+        # response for minutes. The task logs its own errors.
+        asyncio.create_task(self._store_session_safe(report))
+
+        # Remember the report so /session/stop retries are idempotent.
+        self.last_report = report
+
+        logger.info(f"✅ Session {self.session_id} completed")
+
+        return report
+
+    async def _store_session_safe(self, report):
         try:
             await self._store_session(report)
         except Exception as e:
-            logger.warning(f"⚠️ Failed to store: {e}")
-        
-        logger.info(f"✅ Session {self.session_id} completed")
-        
-        return report
+            logger.warning(f"⚠️ Background storage failed: {e}")
 
     async def _store_session(self, report):
         """Persist final session report to ChromaDB."""
