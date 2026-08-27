@@ -7,13 +7,21 @@ python-multipart==0.0.6
 assemblyai>=0.44.0  # Need v3 streaming API support
 pyaudio==0.2.14
 numpy==1.26.4
-websockets>=11.0  # For WebSocket support (if needed)
+websockets>=11.0
 
 # AI/ML Models
 google-generativeai>=0.8.0  # required for gemini-2.5-flash; older versions only support gemini-1.5-*
-torch==2.9.0
-torchaudio==2.9.0
-transformers==4.35.0
+torch>=2.4.0
+torchaudio>=2.4.0
+transformers>=4.44.0        # needed by models/vak_inference once weights are supplied
+
+# Classical ML - REQUIRED, not optional.
+# models/interest_detection/engagement_pipeline.pkl unpickles into sklearn
+# estimators (RandomForestClassifier, StandardScaler, LabelEncoder) and the
+# loader calls joblib directly. Both were missing from this file, so a clean
+# install could not load the one model that ships usable weights.
+scikit-learn>=1.5.0
+joblib>=1.3.0
 
 # Database
 chromadb==0.4.18
@@ -28,3 +36,15 @@ websocket-client==1.6.4
 python-dotenv==1.0.0
 pydantic==2.5.0
 requests==2.31.0
+
+# ---------------------------------------------------------------------------
+# Optional extras - only needed to enable currently-blocked models.
+# See docs/known-gaps.md for what else each one requires.
+# ---------------------------------------------------------------------------
+# tensorflow>=2.17.0   # to run models/sarcasm_detection/model_lstm.pkl (Keras
+#                      # LSTM). Also needs the training tokenizer, which is
+#                      # not in the repository - the model is unusable without
+#                      # it, so this stays commented out.
+# torch-geometric>=2.5 # to run models/emotion_recognition/model_weight.pth
+#                      # (graph-conv net). Also needs the training-time graph
+#                      # construction and a 40-dim audio feature extractor.

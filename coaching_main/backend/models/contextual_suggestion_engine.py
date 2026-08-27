@@ -3,7 +3,7 @@ Contextual Real-time Suggestion Engine
 Generates specific, actionable coaching suggestions based on conversation context
 """
 import logging
-from typing import List, Dict
+from typing import List
 from backend.schemas.data_models import AudioChunk, ModelInferences, GROWPhase
 
 logger = logging.getLogger(__name__)

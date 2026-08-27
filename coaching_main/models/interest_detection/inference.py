@@ -13,7 +13,6 @@ from pathlib import Path
 import joblib
 import torch
 import re
-from collections import Counter
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +74,73 @@ class InterestDetectionModel:
         except Exception as e:
             logger.error(f"Error loading interest detection pipeline :{e}")
     
+    #: Attributes that may be absent on an instance restored from a pickle.
+    _OPTIONAL_ATTRS = ("text_model", "audio_model", "vectorizer", "scaler")
+
+    def __getattr__(self, name):
+        """Return None for optional components missing on unpickled instances.
+
+        ``engagement_pipeline.pkl`` restores an EngagementPredictor directly,
+        bypassing ``__init__``, so attributes set there simply do not exist.
+        Without this, every prediction raised AttributeError, was swallowed by
+        a broad except, and logged an error line per turn while quietly
+        falling through to the rule-based path.
+        """
+        if name in type(self)._OPTIONAL_ATTRS:
+            return None
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute {name!r}"
+        )
+
+    @property
+    def status(self):
+        """Load state for this model.
+
+        Implemented as a property rather than an attribute set in __init__:
+        the shipped ``engagement_pipeline.pkl`` unpickles into an instance
+        directly, bypassing __init__, so an instance attribute would be
+        absent on exactly the object the engine actually uses.
+
+        The shipped pipeline is a RandomForest over 9744 **audio** features
+        (MFCC-scale, classes High/Medium/Low Engagement) stored under
+        ``.model``/``.scaler``. Nothing in this application ever populates
+        ``AudioChunk.audio_data``, and the feature extraction used at
+        training time is not documented, so the classifier cannot be fed.
+        Text scoring falls through to the keyword heuristic below - which
+        is why engagement numbers looked plausible while the trained model
+        was never actually consulted.
+        """
+        from backend.models.model_status import heuristic, trained
+
+        if getattr(self, "text_model", None) is not None:
+            return trained(
+                "interest_detection",
+                "engagement_pipeline.pkl",
+                detail="trained text engagement pipeline loaded",
+            )
+
+        audio_model = getattr(self, "model", None)
+        if audio_model is not None:
+            n_features = getattr(audio_model, "n_features_in_", "?")
+            return heuristic(
+                "interest_detection",
+                blocking_reason=(
+                    f"engagement_pipeline.pkl holds a RandomForest over {n_features} "
+                    "audio features, but AudioChunk.audio_data is never populated "
+                    "and the training-time feature extraction is undocumented."
+                ),
+                detail="using keyword heuristic for engagement",
+                found=["engagement_pipeline.pkl"],
+                missing=["audio feature extractor"],
+            )
+
+        return heuristic(
+            "interest_detection",
+            blocking_reason="engagement_pipeline.pkl missing or failed to load",
+            detail="using keyword heuristic for engagement",
+            missing=["engagement_pipeline.pkl"],
+        )
+
     def predict(self, text: str, audio_data: Optional[bytes] = None) -> float:
         """
         Predict interest level from text and/or audio data.

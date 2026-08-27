@@ -9,12 +9,10 @@ from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from backend.core.orchestrator import CoachingObserverSystem
-from backend.schemas.data_models import SessionReport
 
 # Load environment variables
 load_dotenv()
@@ -48,9 +46,10 @@ orchestrator: Optional[CoachingObserverSystem] = None
 
 # Request/Response Models
 class SessionStartRequest(BaseModel):
-    session_type: str = "live"
+    session_type: str = "live"          # "live" | "file" | "replay"
     device_index: Optional[int] = None
-    coach_speaker_id: Optional[str] = None  # For file mode: "A" or "B"
+    coach_speaker_id: Optional[str] = None  # File/replay mode: "A" or "B"
+    transcript_path: Optional[str] = None   # Replay mode only
 
 
 class SessionStartResponse(BaseModel):
@@ -137,8 +136,8 @@ async def start_session(request: SessionStartRequest):
         if orchestrator.session_active:
             raise HTTPException(status_code=400, detail="Session already active")
         
-        # Check for API key
-        if not os.getenv("ASSEMBLYAI_API_KEY"):
+        # Replay mode reads a stored transcript, so it needs no API key.
+        if request.session_type != "replay" and not os.getenv("ASSEMBLYAI_API_KEY"):
             raise HTTPException(
                 status_code=500,
                 detail="ASSEMBLYAI_API_KEY not configured. Please set it in your .env file."
@@ -147,6 +146,7 @@ async def start_session(request: SessionStartRequest):
         session_id = await orchestrator.start_session(
             session_type=request.session_type,
             device_index=request.device_index,
+            file_path=request.transcript_path,
             coach_speaker_id=request.coach_speaker_id
         )
         
@@ -264,10 +264,16 @@ async def get_session_status():
     if not orchestrator:
         raise HTTPException(status_code=500, detail="System not initialized")
     
+    state = orchestrator.state if orchestrator.session_active else None
+
     return {
         "active": orchestrator.session_active,
         "session_id": orchestrator.session_id if orchestrator.session_active else None,
-        "chunks_processed": len(orchestrator.session_data.get("chunks", [])) if orchestrator.session_active else 0
+        "chunks_processed": len(orchestrator.session_data.get("chunks", [])) if orchestrator.session_active else 0,
+        "session_type": state.session_type if state else None,
+        # Replay/file sources run out; the dashboard uses this to stop
+        # polling and prompt for the report. Always False for live mode.
+        "source_finished": bool(state.source_finished) if state else False,
     }
 
 
@@ -315,12 +321,11 @@ async def get_model_status():
         if not orchestrator:
             raise HTTPException(status_code=500, detail="System not initialized")
         
-        model_status = orchestrator.inference_engine.get_model_status()
-        
-        return {
-            "models": model_status,
-            "all_loaded": all(status == "loaded" for status in model_status.values())
-        }
+        # Returns per-model state ("trained" / "heuristic" / "unavailable")
+        # with the blocking reason attached. The previous version reported
+        # "all_loaded: true" whenever the wrapper classes constructed, which
+        # they always did - even with no weights in memory.
+        return orchestrator.inference_engine.get_model_status()
     
     except Exception as e:
         logger.error(f"Error getting model status: {e}")

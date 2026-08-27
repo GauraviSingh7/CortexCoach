@@ -1,349 +1,245 @@
 """
-Model Inference Engine - Fixed for Pickle Compatibility
-======================================================
+Model inference engine.
+
+Loads the four model adapters, reports honestly what each one is actually
+doing, and runs them concurrently over a chunk.
+
+Two rules this module now enforces:
+
+* A model is only reported as ``trained`` when real weights are in memory.
+  The previous version marked a model ``"loaded"`` whenever its wrapper
+  class could be constructed, which was always - every wrapper probed for
+  filenames that were never shipped, found nothing, and raised nothing.
+
+* Adapters return ``None`` for "no model output". This engine passes that
+  ``None`` straight through instead of substituting a default, so the
+  orchestrator can choose a labelled fallback. Manufacturing
+  ``{"neutral": 1.0}`` here is what made every turn read as 100% neutral.
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
-import sys
 import pickle
-import joblib
-from typing import Dict, Optional, Any
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any, Callable, Dict, Optional
 
+import joblib
+
+from backend.models.model_status import ModelState, ModelStatus, summarize, unavailable
 from backend.schemas.data_models import AudioChunk, ModelInferences
 
-# CRITICAL: Import model classes BEFORE loading pickles
-# This registers them in the module namespace
+# Model classes must be importable before their pickles are opened so that
+# pickle can resolve the class references stored inside them.
 from models.emotion_recognition.inference import EmotionRecognitionModel
-from models.interest_detection.inference import InterestDetectionModel, EngagementPredictor
+from models.interest_detection.inference import EngagementPredictor, InterestDetectionModel
 from models.sarcasm_detection.inference import SarcasmDetectionModel
 from models.vak_inference.inference import VAKInferenceModel
 
 logger = logging.getLogger(__name__)
 
+
 class ModelLoadError(Exception):
-    """Custom exception for model loading errors"""
-    pass
-
-class ModelInferenceError(Exception):
-    """Custom exception for model inference errors"""
-    pass
+    """Raised when a model directory is missing entirely."""
 
 
-# =============================================================================
-# PICKLE COMPATIBILITY FIX
-# =============================================================================
 class CustomUnpickler(pickle.Unpickler):
-    """Custom unpickler to handle legacy class names"""
-    
-    def find_class(self, module, name):
-        """Override find_class to redirect legacy classes"""
-        
-        # Map of legacy module paths to current ones
-        redirects = {
-            '__main__': 'models.interest_detection.inference',
-            '__mp_main__': 'models.interest_detection.inference',
-        }
-        
-        # If the module is in our redirect map, use the new path
-        if module in redirects and name == 'EngagementPredictor':
-            module = redirects[module]
-            logger.info(f"Redirecting pickle class: {name} from old module to {module}")
-        
-        # Try to find the class
+    """Resolves classes pickled from ``__main__`` in a training script."""
+
+    _REDIRECTS = {
+        "__main__": "models.interest_detection.inference",
+        "__mp_main__": "models.interest_detection.inference",
+    }
+
+    def find_class(self, module: str, name: str):
+        if module in self._REDIRECTS and name == "EngagementPredictor":
+            module = self._REDIRECTS[module]
         try:
             return super().find_class(module, name)
-        except (AttributeError, ModuleNotFoundError) as e:
-            logger.warning(f"Could not find {module}.{name}, trying alternatives...")
-            
-            # Fallback: try to find it in interest_detection module
-            if name == 'EngagementPredictor':
-                try:
-                    from models.interest_detection.inference import EngagementPredictor
-                    return EngagementPredictor
-                except ImportError:
-                    pass
-            
-            # If all else fails, raise the original error
-            raise e
+        except (AttributeError, ModuleNotFoundError):
+            if name == "EngagementPredictor":
+                return EngagementPredictor
+            raise
 
 
 def load_pickle_with_compatibility(file_path: Path):
-    """Load pickle file with compatibility fixes"""
+    """Open a pickle written by a training script, tolerating stale paths."""
+    # The shipped pipeline is a joblib (numpy-pickle) file, so try joblib
+    # first; CustomUnpickler is the fallback for plain pickles written by a
+    # training script under __main__.
     try:
-        with open(file_path, 'rb') as f:
-            return CustomUnpickler(f).load()
-    except Exception as e:
-        logger.error(f"Failed to load pickle with custom unpickler: {e}")
-        # Fallback to regular joblib
         return joblib.load(file_path)
+    except Exception as joblib_error:
+        logger.debug("joblib could not read %s (%s); trying custom unpickler",
+                     file_path, joblib_error)
+        with open(file_path, "rb") as handle:
+            return CustomUnpickler(handle).load()
 
 
-# =============================================================================
-# Model Inference Engine
-# =============================================================================
 class ModelInferenceEngine:
-    """Production-ready inference engine with pickle compatibility"""
-    
+    """Loads the model adapters and runs them over audio chunks."""
+
     def __init__(self, models_base_path: str = "./models"):
         self.models_base_path = Path(models_base_path)
-        self.models = {}
-        self.model_status = {}
-        
-        # Thread pool for concurrent inference
+        self.models: Dict[str, Any] = {}
+        self.statuses: Dict[str, ModelStatus] = {}
         self.executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="inference")
-        
-        # Register legacy classes in sys.modules BEFORE loading
+
         self._register_legacy_classes()
-        
-        # Load all models
         self._load_all_models()
-    
-    def _register_legacy_classes(self):
-        """Register legacy class names in sys.modules for pickle compatibility"""
-        try:
-            # Import the actual classes
-            from models.interest_detection.inference import EngagementPredictor, InterestDetectionModel
-            
-            # Register in __main__ and __mp_main__ for multiprocessing compatibility
-            if '__main__' not in sys.modules:
-                import types
-                main_module = types.ModuleType('__main__')
-                sys.modules['__main__'] = main_module
-            
-            if '__mp_main__' not in sys.modules:
-                import types
-                mp_module = types.ModuleType('__mp_main__')
-                sys.modules['__mp_main__'] = mp_module
-            
-            # Add the classes to these modules
-            sys.modules['__main__'].EngagementPredictor = EngagementPredictor
-            sys.modules['__main__'].InterestDetectionModel = InterestDetectionModel
-            sys.modules['__mp_main__'].EngagementPredictor = EngagementPredictor
-            sys.modules['__mp_main__'].InterestDetectionModel = InterestDetectionModel
-            
-            logger.info("Legacy classes registered for pickle compatibility")
-            
-        except Exception as e:
-            logger.warning(f"Could not register legacy classes: {e}")
-    
-    def _load_all_models(self):
-        """Load all available models with error handling"""
-        model_loaders = {
-            'emotion_recognition': self._load_emotion_model,
-            'interest_detection': self._load_interest_model, 
-            'sarcasm_detection': self._load_sarcasm_model,
-            'vak_inference': self._load_vak_model
+        self._log_status()
+
+    # -- loading -----------------------------------------------------------
+
+    @staticmethod
+    def _register_legacy_classes() -> None:
+        """Expose model classes under ``__main__`` for legacy pickles."""
+        import types
+
+        for module_name in ("__main__", "__mp_main__"):
+            module = sys.modules.get(module_name)
+            if module is None:
+                module = types.ModuleType(module_name)
+                sys.modules[module_name] = module
+            module.EngagementPredictor = EngagementPredictor
+            module.InterestDetectionModel = InterestDetectionModel
+
+    def _load_all_models(self) -> None:
+        loaders: Dict[str, Callable[[], Any]] = {
+            "emotion_recognition": self._load_emotion_model,
+            "interest_detection": self._load_interest_model,
+            "sarcasm_detection": self._load_sarcasm_model,
+            "vak_inference": self._load_vak_model,
         }
-        
-        for model_name, loader_func in model_loaders.items():
+
+        for name, loader in loaders.items():
             try:
-                logger.info(f"Loading {model_name} model...")
-                model_instance = loader_func()
-                self.models[model_name] = model_instance
-                self.model_status[model_name] = "loaded"
-                logger.info(f"✅ {model_name} model loaded successfully")
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to load {model_name} model: {str(e)}", exc_info=True)
-                self.models[model_name] = None
-                self.model_status[model_name] = f"error: {str(e)}"
-    
-    def _load_emotion_model(self):
-        """Load the Speech Emotion Recognition model"""
-        model_path = self.models_base_path / "emotion_recognition"
-        if not model_path.exists():
-            raise ModelLoadError(f"Emotion model path not found: {model_path}")
-        return EmotionRecognitionModel(model_path)
-    
+                instance = loader()
+                self.models[name] = instance
+                status = getattr(instance, "status", None)
+                self.statuses[name] = status or unavailable(
+                    name, "adapter did not report a status"
+                )
+            except Exception as exc:
+                logger.error("Failed to load %s: %s", name, exc, exc_info=True)
+                self.models[name] = None
+                self.statuses[name] = unavailable(name, str(exc))
+
+    def _model_dir(self, name: str) -> Path:
+        path = self.models_base_path / name
+        if not path.exists():
+            raise ModelLoadError(f"model directory not found: {path}")
+        return path
+
+    def _load_emotion_model(self) -> EmotionRecognitionModel:
+        return EmotionRecognitionModel(self._model_dir("emotion_recognition"))
+
+    def _load_sarcasm_model(self) -> SarcasmDetectionModel:
+        return SarcasmDetectionModel(self._model_dir("sarcasm_detection"))
+
+    def _load_vak_model(self) -> VAKInferenceModel:
+        return VAKInferenceModel(self._model_dir("vak_inference"))
+
     def _load_interest_model(self):
-        """Load the Interest Level Detection model"""
-        model_path = self.models_base_path / "interest_detection"
-        if not model_path.exists():
-            raise ModelLoadError(f"Interest model path not found: {model_path}")
-        
-        # Try to load with compatibility fix
-        pipeline_file = model_path / "engagement_pipeline.pkl"
+        path = self._model_dir("interest_detection")
+        pipeline_file = path / "engagement_pipeline.pkl"
+
         if pipeline_file.exists():
             try:
-                # Use custom unpickler for compatibility
-                loaded_model = load_pickle_with_compatibility(pipeline_file)
-                logger.info(f"Loaded interest model from {pipeline_file}")
-                
-                # Wrap it in InterestDetectionModel if it's not already
-                if isinstance(loaded_model, (InterestDetectionModel, EngagementPredictor)):
-                    return loaded_model
-                else:
-                    # It's a raw sklearn pipeline - wrap it
-                    model_wrapper = InterestDetectionModel(model_path)
-                    model_wrapper.text_model = loaded_model
-                    return model_wrapper
-                    
-            except Exception as e:
-                logger.error(f"Failed to load pickle with compatibility fix: {e}")
-                # Fallback to creating a new model instance
-                return InterestDetectionModel(model_path)
-        else:
-            return InterestDetectionModel(model_path)
-    
-    def _load_sarcasm_model(self):
-        """Load the Sarcasm Detection model"""
-        model_path = self.models_base_path / "sarcasm_detection"
-        if not model_path.exists():
-            raise ModelLoadError(f"Sarcasm model path not found: {model_path}")
-        return SarcasmDetectionModel(model_path)
-    
-    def _load_vak_model(self):
-        """Load the VAK Learning Style Inference model"""
-        model_path = self.models_base_path / "vak_inference"
-        if not model_path.exists():
-            raise ModelLoadError(f"VAK model path not found: {model_path}")
-        return VAKInferenceModel(model_path)
-    
+                loaded = load_pickle_with_compatibility(pipeline_file)
+                if isinstance(loaded, (InterestDetectionModel, EngagementPredictor)):
+                    return loaded
+                # A bare sklearn pipeline - wrap it so .predict() works.
+                wrapper = InterestDetectionModel(path)
+                wrapper.text_model = loaded
+                return wrapper
+            except Exception as exc:
+                logger.error("Interest pipeline failed to load: %s", exc)
+
+        return InterestDetectionModel(path)
+
+    def _log_status(self) -> None:
+        """Make degraded models impossible to miss in the logs."""
+        for status in self.statuses.values():
+            if status.state is ModelState.TRAINED:
+                logger.info("%s", status.log_line())
+            else:
+                logger.warning("%s", status.log_line())
+
+        degraded = [s.name for s in self.statuses.values() if s.is_degraded]
+        if degraded:
+            logger.warning(
+                "%d of %d models are NOT using trained weights: %s. "
+                "Predictions for these come from rule-based heuristics.",
+                len(degraded), len(self.statuses), ", ".join(degraded),
+            )
+
+    # -- inference ---------------------------------------------------------
+
     async def process_chunk(self, chunk: AudioChunk) -> ModelInferences:
-        """Process audio chunk through all available models"""
-        logger.debug(f"Processing chunk from {chunk.speaker}: {chunk.transcript[:50]}...")
-        
-        inference_tasks = {}
-        
-        if self.models.get('emotion_recognition'):
-            inference_tasks['emotion'] = self._run_emotion_inference(chunk)
-        
-        if self.models.get('interest_detection'):
-            inference_tasks['interest'] = self._run_interest_inference(chunk)
-            
-        if self.models.get('sarcasm_detection'):
-            inference_tasks['sarcasm'] = self._run_sarcasm_inference(chunk)
-            
-        if self.models.get('vak_inference'):
-            inference_tasks['vak'] = self._run_vak_inference(chunk)
-        
-        inference_tasks['digression'] = self._run_digression_inference(chunk)
-        
-        results = {}
-        if inference_tasks:
-            try:
-                completed_tasks = await asyncio.gather(
-                    *inference_tasks.values(),
-                    return_exceptions=True
-                )
-                
-                for task_name, result in zip(inference_tasks.keys(), completed_tasks):
-                    if isinstance(result, Exception):
-                        logger.error(f"Inference error for {task_name}: {result}")
-                        results[task_name] = self._get_fallback_result(task_name)
-                    else:
-                        results[task_name] = result
-                        
-            except Exception as e:
-                logger.error(f"Batch inference error: {e}")
-                for task_name in inference_tasks.keys():
-                    results[task_name] = self._get_fallback_result(task_name)
-        
-        return ModelInferences(
-            emotion=results.get('emotion', {}),
-            interest_level=results.get('interest', 0.5),
-            sarcasm_score=results.get('sarcasm', 0.0),
-            vak_style=results.get('vak', {}),
-            digression_score=results.get('digression', 0.0)
-        )
-    
-    async def _run_emotion_inference(self, chunk: AudioChunk) -> Dict[str, float]:
-        """Run emotion recognition inference"""
-        model = self.models['emotion_recognition']
-        if not model:
-            return {}
-            
-        loop = asyncio.get_event_loop()
-        try:
-            emotion_probs = await loop.run_in_executor(
-                self.executor, 
-                model.predict, 
-                chunk.transcript, 
-                chunk.audio_data
-            )
-            return emotion_probs
-        except Exception as e:
-            logger.error(f"Emotion inference error: {e}")
-            raise ModelInferenceError(f"Emotion model inference failed: {e}")
-    
-    async def _run_interest_inference(self, chunk: AudioChunk) -> float:
-        """Run interest level detection inference"""
-        model = self.models['interest_detection']
-        if not model:
-            return 0.5
-            
-        loop = asyncio.get_event_loop()
-        try:
-            interest_score = await loop.run_in_executor(
-                self.executor,
-                model.predict,
-                chunk.transcript,
-                chunk.audio_data
-            )
-            return float(interest_score)
-        except Exception as e:
-            logger.error(f"Interest inference error: {e}")
-            raise ModelInferenceError(f"Interest model inference failed: {e}")
-    
-    async def _run_sarcasm_inference(self, chunk: AudioChunk) -> float:
-        """Run sarcasm detection inference"""
-        model = self.models['sarcasm_detection']
-        if not model:
-            return 0.0
-            
-        loop = asyncio.get_event_loop()
-        try:
-            sarcasm_score = await loop.run_in_executor(
-                self.executor,
-                model.predict,
-                chunk.transcript
-            )
-            return float(sarcasm_score)
-        except Exception as e:
-            logger.error(f"Sarcasm inference error: {e}")
-            raise ModelInferenceError(f"Sarcasm model inference failed: {e}")
-    
-    async def _run_vak_inference(self, chunk: AudioChunk) -> Dict[str, float]:
-        """Run VAK learning style inference"""
-        model = self.models['vak_inference']
-        if not model:
-            return {}
-            
-        loop = asyncio.get_event_loop()
-        try:
-            vak_scores = await loop.run_in_executor(
-                self.executor,
-                model.predict,
-                chunk.transcript
-            )
-            return vak_scores
-        except Exception as e:
-            logger.error(f"VAK inference error: {e}")
-            raise ModelInferenceError(f"VAK model inference failed: {e}")
-    
-    async def _run_digression_inference(self, chunk: AudioChunk) -> float:
-        """Placeholder for LLM-based digression detection"""
-        return 0.1
-    
-    def _get_fallback_result(self, task_name: str) -> Any:
-        """Get fallback results when models fail"""
-        fallbacks = {
-            'emotion': {},
-            'interest': 0.5,
-            'sarcasm': 0.0,
-            'vak': {},
-            'digression': 0.1
+        """Run every available model over one chunk.
+
+        Fields are ``None`` when no trained model produced a value; the
+        orchestrator decides on the labelled fallback.
+        """
+        tasks = {
+            "emotion": self._run(
+                self.models.get("emotion_recognition"),
+                lambda m: m.predict(chunk.transcript, chunk.audio_data),
+            ),
+            "interest": self._run(
+                self.models.get("interest_detection"),
+                lambda m: m.predict(chunk.transcript, chunk.audio_data),
+            ),
+            "sarcasm": self._run(
+                self.models.get("sarcasm_detection"),
+                lambda m: m.predict(chunk.transcript),
+            ),
+            "vak": self._run(
+                self.models.get("vak_inference"),
+                lambda m: m.predict(chunk.transcript),
+            ),
         }
-        return fallbacks.get(task_name, None)
-    
-    def get_model_status(self) -> Dict[str, str]:
-        """Get the status of all models"""
-        return self.model_status.copy()
-    
-    def __del__(self):
-        """Cleanup thread pool on deletion"""
-        if hasattr(self, 'executor'):
-            self.executor.shutdown(wait=True)
+
+        completed = await asyncio.gather(*tasks.values(), return_exceptions=True)
+        results: Dict[str, Any] = {}
+        for name, outcome in zip(tasks, completed):
+            if isinstance(outcome, Exception):
+                logger.error("Inference error for %s: %s", name, outcome)
+                results[name] = None
+            else:
+                results[name] = outcome
+
+        interest = results.get("interest")
+        return ModelInferences(
+            emotion=results.get("emotion"),
+            interest_level=float(interest) if interest is not None else None,
+            sarcasm_score=results.get("sarcasm"),
+            vak_style=results.get("vak"),
+            digression_score=None,
+            emotion_source="model" if results.get("emotion") else None,
+            sarcasm_source="model" if results.get("sarcasm") is not None else None,
+            vak_source="model" if results.get("vak") else None,
+        )
+
+    async def _run(self, model: Optional[Any], call: Callable[[Any], Any]):
+        """Run one model call on the thread pool; ``None`` if unavailable."""
+        if model is None:
+            return None
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.executor, call, model)
+
+    # -- reporting ---------------------------------------------------------
+
+    def get_model_status(self) -> Dict[str, Any]:
+        """Full status payload for ``/model-status`` and the dashboard."""
+        return summarize(self.statuses)
+
+    def status_of(self, name: str) -> Optional[ModelStatus]:
+        return self.statuses.get(name)
+
+    def shutdown(self) -> None:
+        self.executor.shutdown(wait=False)

@@ -16,6 +16,7 @@ from assemblyai.streaming.v3 import (
     StreamingError,
 )
 
+from backend.models.speaker_router import SpeakerRouter
 from backend.schemas.data_models import AudioChunk
 
 logger = logging.getLogger(__name__)
@@ -33,15 +34,10 @@ class AudioProcessor:
         self.event_loop: asyncio.AbstractEventLoop | None = None
         self.stream_thread = None
         self.default_coach_role = default_coach_role
-        # Optional override: caller may pin which AssemblyAI speaker id is the coach
-        # (e.g. "A" or "SPEAKER_A"). When set, the heuristic is bypassed.
-        self.coach_speaker_id: Optional[str] = None
-        if coach_speaker_id:
-            normalized = coach_speaker_id.upper()
-            self.coach_speaker_id = normalized if normalized.startswith("SPEAKER_") else f"SPEAKER_{normalized}"
-        # Maps AssemblyAI speaker_id (e.g. "SPEAKER_A") to role ("coach"/"coachee")
-        # Locked on first classification so same voice keeps same label all session
-        self._speaker_map: dict[str, str] = {}
+        # Role assignment lives in SpeakerRouter: it accumulates evidence per
+        # diarized speaker id and locks each role once, so a voice cannot
+        # flip roles mid-session. Passing coach_speaker_id pins the mapping.
+        self.router = SpeakerRouter(coach_speaker_id)
 
     async def start_live_transcription(self, audio_queue: asyncio.Queue, device_index=None):
         """Start live transcription with AssemblyAI streaming API"""
@@ -139,36 +135,16 @@ class AudioProcessor:
             logger.warning("Audio queue is None, cannot process transcription")
             return
 
-        # Use AssemblyAI's speaker_id when available to ensure consistency,
-        # falling back to heuristic-only when diarization produces no id
         speaker_id = getattr(event, "speaker_id", None)
-        is_final   = bool(getattr(event, "end_of_turn", True))
-        duration   = getattr(event, "audio_duration_seconds", 2.0)
+        is_final = bool(getattr(event, "end_of_turn", True))
+        duration = getattr(event, "audio_duration_seconds", 2.0)
 
-        # Prefer AssemblyAI diarization: assign roles by ORDER of appearance,
-        # not by pronoun heuristics. Heuristic is only used when AssemblyAI
-        # gives no speaker_id at all.
-        if speaker_id:
-            if speaker_id not in self._speaker_map and is_final:
-                # Explicit override from session start takes precedence.
-                if self.coach_speaker_id and speaker_id == self.coach_speaker_id:
-                    self._speaker_map[speaker_id] = "coach"
-                elif self.coach_speaker_id:
-                    self._speaker_map[speaker_id] = "coachee"
-                else:
-                    # Order-based assignment: first distinct voice → coach,
-                    # second → coachee. Third+ falls back to heuristic.
-                    existing_roles = set(self._speaker_map.values())
-                    if "coach" not in existing_roles:
-                        self._speaker_map[speaker_id] = "coach"
-                    elif "coachee" not in existing_roles:
-                        self._speaker_map[speaker_id] = "coachee"
-                    else:
-                        self._speaker_map[speaker_id] = self._detect_speaker(transcript_text)
-                logger.info(f"🔒 Locked speaker mapping: {speaker_id} → {self._speaker_map[speaker_id]}")
-            speaker_label = self._speaker_map.get(speaker_id) or self._detect_speaker(transcript_text)
-        else:
-            speaker_label = self._detect_speaker(transcript_text)
+        # Diarization decides *who* is speaking; the router decides which
+        # role that speaker holds, once, from accumulated evidence. Only
+        # final turns contribute evidence - partials are fragments.
+        if is_final:
+            self.router.observe(speaker_id, transcript_text)
+        speaker_label = self.router.role_for(speaker_id, transcript_text)
 
         chunk = AudioChunk(
             timestamp=datetime.now().timestamp(),
@@ -184,55 +160,6 @@ class AudioProcessor:
             logger.info(f"📝 Transcription received: [{speaker_label}] {transcript_text[:50]}...")
         except Exception as e:
             logger.error(f"Error putting chunk in queue: {e}", exc_info=True)
-
-    def _detect_speaker(self, transcript: str) -> str:
-        """
-        Detect speaker based on transcript content.
-        Coach: asks questions, uses coaching language
-        Coachee: shares problems, uncertainties, goals
-        """
-        transcript_lower = transcript.lower()
-        
-        # Strong coachee indicators (person seeking help)
-        coachee_phrases = [
-            "i don't know", "i'm not sure", "i worry", "i'm worried",
-            "i feel", "i think", "my problem", "i want to", "i need",
-            "i'm confused", "i'm stuck", "help me", "what should i",
-            "i can't decide", "i'm struggling", "i don't understand",
-            "my goal", "my issue", "my challenge"
-        ]
-        
-        # Strong coach indicators (person helping)
-        coach_phrases = [
-            "what would you", "how do you feel", "tell me about",
-            "what's stopping you", "what if you", "have you considered",
-            "what are your options", "what's your goal", "let's explore",
-            "how can i help", "what do you think", "describe",
-            "what's important", "on a scale of"
-        ]
-        
-        # Count matches
-        coachee_score = sum(1 for phrase in coachee_phrases if phrase in transcript_lower)
-        coach_score = sum(1 for phrase in coach_phrases if phrase in transcript_lower)
-        
-        # Questions are usually from coach
-        if "?" in transcript:
-            coach_score += 1
-        
-        # First person statements often from coachee
-        if any(word in transcript_lower.split() for word in ["i", "my", "me"]):
-            coachee_score += 0.5
-        
-        # Decide
-        if coachee_score > coach_score:
-            return "coachee"
-        elif coach_score > coachee_score:
-            return "coach"
-        else:
-            # Default: if uncertain and contains "I feel/think/want", it's coachee
-            if any(phrase in transcript_lower for phrase in ["i feel", "i think", "i want", "i don't"]):
-                return "coachee"
-            return "coach" if self.default_coach_role else "coachee"
 
     def _handle_error_wrapper(self, client: StreamingClient, error: StreamingError):
         """Wrapper for error handler"""
