@@ -1,253 +1,189 @@
-import json
-import re
-import logging
-from typing import Dict, Any
-import google.generativeai as genai
+"""
+Gemini narrative layer.
 
-from backend.schemas.data_models import (
-    AudioChunk,
-    ModelInferences,
-    RealTimeFeedback,
-    SessionReport,
-)
+Gemini is used to *write* about the session, not to measure it. It receives
+the metrics the pipeline already computed - GROW distribution and coverage,
+engagement, listening and questioning breakdowns, sarcasm and digression
+moments, learning style, and which models were degraded - and returns prose
+only. The caller merges just the prose fields back in.
+
+Previously this class received nothing but ``speaker``/``transcript``/
+``timestamp`` for the first ten chunks and was asked to invent
+``grow_phases``, ``coaching_effectiveness``, ``emotional_journey`` and
+engagement figures. Those invented numbers then replaced the computed ones,
+which is why a Gemini-generated report could contain less information than
+the local analyzer's.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+from typing import Any, Dict, List, Optional, Sequence
+
+import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 
 
 class GeminiAnalyzer:
-    """Handles AI-powered analysis using Google Gemini"""
+    """Generates the narrative sections of a session report."""
 
     # Requires google-generativeai>=0.8.0 for `gemini-2.5-flash`.
-    # Fallback chain handles older SDKs that only know gemini-1.5-* names.
-    _MODEL_CANDIDATES = ("gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro")
+    _MODEL_CANDIDATES = (
+        "gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro",
+    )
 
     def __init__(self, api_key: str):
         self.model = None
         try:
             genai.configure(api_key=api_key)
-        except Exception as e:
-            logger.warning(f"Gemini configure() failed: {e}. Gemini disabled.")
+        except Exception as exc:
+            logger.warning("Gemini configure() failed: %s. Gemini disabled.", exc)
             return
 
         for candidate in self._MODEL_CANDIDATES:
             try:
                 self.model = genai.GenerativeModel(candidate)
-                logger.info(f"✅ Gemini model initialized: {candidate}")
+                logger.info("Gemini model initialised: %s", candidate)
                 break
-            except Exception as e:
-                logger.warning(f"Gemini model '{candidate}' unavailable ({e}); trying next.")
+            except Exception as exc:
+                logger.debug("Gemini model '%s' unavailable (%s)", candidate, exc)
+
         if not self.model:
-            logger.warning("⚠️ No compatible Gemini model found — falling back to local analyzer.")
-        
-    def _parse_gemini_json(self, raw_text: str) -> dict:
+            logger.warning("No compatible Gemini model found; local reports only.")
+
+    # -- report narration --------------------------------------------------
+
+    async def generate_session_report(
+        self,
+        session_data: Dict[str, Any],
+        computed: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Return narrative fields for a session.
+
+        Only ``key_insights``, ``recommendations`` and ``transcript_summary``
+        are returned; the caller keeps its own computed metrics.
         """
-        Parse JSON from Gemini response, handling markdown code blocks.
-        
-        Args:
-            raw_text: Raw text response from Gemini
-            
-        Returns:
-            Parsed JSON dictionary
-            
-        Raises:
-            ValueError: If JSON cannot be parsed
-        """
-        text = raw_text.strip()
-        
-        # Try direct JSON parse first
+        if not self.model:
+            raise RuntimeError("Gemini model not available")
+
+        computed = computed or {}
+        prompt = self._build_prompt(session_data, computed)
+        response = await self.model.generate_content_async(prompt)
+        parsed = self._parse_json(response.text)
+
+        return {
+            "key_insights": self._as_str_list(parsed.get("key_insights")),
+            "recommendations": self._as_str_list(parsed.get("recommendations")),
+            "transcript_summary": str(parsed.get("transcript_summary") or "").strip(),
+        }
+
+    def _build_prompt(
+        self, session_data: Dict[str, Any], computed: Dict[str, Any]
+    ) -> str:
+        chunks = session_data.get("chunks", []) or []
+        model_status = computed.get("model_status", {}) or {}
+        degraded = model_status.get("degraded", [])
+
+        caveat = (
+            "\nIMPORTANT: these signals came from rule-based heuristics rather "
+            f"than trained models: {', '.join(degraded)}. Do not overstate "
+            "their precision in your narrative.\n" if degraded else ""
+        )
+
+        return f"""You are an expert coaching supervisor writing up a session.
+
+All figures below were computed by the application. Treat them as facts:
+do NOT recalculate, contradict or invent metrics.
+
+SESSION
+- Duration: {session_data.get('duration', 0):.1f} minutes
+- Turns: {len(chunks)} ({computed.get('participants', {})})
+
+GROW PHASES
+{self._fmt(computed.get('grow_phases'))}
+Coverage: {self._fmt(computed.get('grow_coverage'))}
+
+COACHING EFFECTIVENESS
+{self._fmt(computed.get('coaching_effectiveness'))}
+
+LEARNING STYLE (VAK)
+{self._fmt(computed.get('learning_style_analysis')) or 'Insufficient data'}
+
+SARCASM
+{self._fmt(computed.get('sarcasm_summary')) or 'None detected'}
+
+DIGRESSION
+{self._fmt(computed.get('digression_summary')) or 'None detected'}
+
+EMOTIONAL JOURNEY
+{self._fmt(computed.get('emotional_journey'))}
+{caveat}
+TRANSCRIPT
+{self._format_transcript(chunks)}
+
+Write the narrative sections. Return ONLY this JSON, no markdown fences:
+{{
+  "key_insights": ["3-6 specific observations grounded in the data above"],
+  "recommendations": ["3-5 concrete, actionable suggestions for the coach"],
+  "transcript_summary": "One paragraph: what was discussed, how the coach worked, where it landed."
+}}"""
+
+    # -- helpers -----------------------------------------------------------
+
+    @staticmethod
+    def _format_transcript(chunks: Sequence[Any], limit: int = 60) -> str:
+        """Full conversation, not the first ten turns."""
+        if not chunks:
+            return "No interactions recorded."
+        lines = []
+        for index, chunk in enumerate(chunks[:limit], start=1):
+            speaker = getattr(chunk, "speaker", None) or (
+                chunk.get("speaker") if isinstance(chunk, dict) else "unknown"
+            )
+            text = getattr(chunk, "transcript", None) or (
+                chunk.get("transcript") if isinstance(chunk, dict) else ""
+            )
+            lines.append(f"{index}. [{speaker}] {text}")
+        if len(chunks) > limit:
+            lines.append(f"... ({len(chunks) - limit} further turns omitted)")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _fmt(value: Any) -> str:
+        if not value:
+            return ""
+        return json.dumps(value, indent=2, default=str)
+
+    @staticmethod
+    def _as_str_list(value: Any) -> List[str]:
+        if isinstance(value, list):
+            return [str(v).strip() for v in value if str(v).strip()]
+        return []
+
+    def _parse_json(self, raw_text: str) -> Dict[str, Any]:
+        """Extract a JSON object from a model response."""
+        text = (raw_text or "").strip()
+
         try:
             return json.loads(text)
         except json.JSONDecodeError:
             pass
-        
-        # Extract JSON from markdown code blocks (```json ... ```)
-        json_block_pattern = r'```(?:json)?\s*\n?(.*?)\n?```'
-        matches = re.findall(json_block_pattern, text, re.DOTALL)
-        
-        if matches:
-            for match in matches:
-                try:
-                    return json.loads(match.strip())
-                except json.JSONDecodeError:
-                    continue
-        
-        # Try to find JSON between curly braces
-        brace_pattern = r'\{.*\}'
-        brace_matches = re.findall(brace_pattern, text, re.DOTALL)
-        
-        if brace_matches:
-            for match in sorted(brace_matches, key=len, reverse=True):
-                try:
-                    return json.loads(match)
-                except json.JSONDecodeError:
-                    continue
-        
-        logger.error(f"Failed to parse JSON. Raw output: {text[:500]}...")
-        raise ValueError(f"Could not extract valid JSON from response")
 
-    async def analyze_real_time(
-        self,
-        chunk: AudioChunk,
-        inferences: ModelInferences,
-        context: Dict[str, Any],
-    ) -> RealTimeFeedback:
-        """Generate real-time feedback for a coaching interaction"""
-        
-        prompt = f"""Analyze this coaching interaction and provide real-time feedback in JSON format.
+        for match in re.findall(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL):
+            try:
+                return json.loads(match.strip())
+            except json.JSONDecodeError:
+                continue
 
-Current interaction:
-- Speaker: {chunk.speaker}
-- Text: "{chunk.transcript}"
-- Emotion: {inferences.emotion}
-- Engagement: {inferences.interest_level}
-- Sarcasm detected: {inferences.sarcasm_detected}
+        braces = re.findall(r"\{.*\}", text, re.DOTALL)
+        for match in sorted(braces, key=len, reverse=True):
+            try:
+                return json.loads(match)
+            except json.JSONDecodeError:
+                continue
 
-Session context:
-- Previous interactions: {len(context.get('previous_chunks', []))}
-- Session duration: {context.get('duration_minutes', 0):.1f} minutes
-
-Provide feedback as JSON with this structure:
-{{
-    "engagement_score": 0.0-1.0,
-    "emotion": "string",
-    "coaching_technique": "string",
-    "grow_phase": "Goal/Reality/Options/Way Forward",
-    "learning_style": "Visual/Auditory/Kinesthetic",
-    "suggestion": "brief actionable suggestion",
-    "highlight": "key moment or insight"
-}}
-
-Return ONLY the JSON, no markdown formatting."""
-
-        if not self.model:
-            raise RuntimeError("Gemini model not available")
-
-        try:
-            response = await self.model.generate_content_async(prompt)
-            feedback_dict = self._parse_gemini_json(response.text)
-            
-            return RealTimeFeedback(
-                timestamp=chunk.timestamp,
-                speaker=chunk.speaker,
-                engagement_score=feedback_dict.get('engagement_score', 0.5),
-                emotion=feedback_dict.get('emotion', inferences.emotion),
-                coaching_technique=feedback_dict.get('coaching_technique', 'Unknown'),
-                grow_phase=feedback_dict.get('grow_phase', 'Reality'),
-                learning_style=feedback_dict.get('learning_style', 'Unknown'),
-                suggestion=feedback_dict.get('suggestion', 'Continue with current approach'),
-                highlight=feedback_dict.get('highlight', ''),
-            )
-            
-        except Exception as e:
-            logger.error(f"Real-time analysis error: {e}")
-            # Return fallback feedback
-            return RealTimeFeedback(
-                timestamp=chunk.timestamp,
-                speaker=chunk.speaker,
-                engagement_score=0.5,
-                emotion=inferences.emotion,
-                coaching_technique='Active Listening',
-                grow_phase='Reality',
-                learning_style='Unknown',
-                suggestion='Continue the conversation',
-                highlight='',
-            )
-
-    async def generate_session_report(self, session_data: Dict[str, Any]) -> SessionReport:
-        """Generate comprehensive session report"""
-        
-        prompt = f"""Analyze this coaching session and generate a comprehensive report in JSON format.
-
-Session data:
-- Session ID: {session_data.get('session_id')}
-- Duration: {session_data.get('duration', 0):.1f} minutes
-- Total interactions: {len(session_data.get('chunks', []))}
-- Average engagement: {self._calculate_avg_engagement(session_data.get('chunks', []))}
-
-Interactions summary:
-{self._format_chunks_for_prompt(session_data.get('chunks', [])[:10])}
-
-Generate a report with this EXACT JSON structure (no markdown, no code blocks):
-{{
-    "session_id": "string",
-    "duration_minutes": 0.0,
-    "participants": {{
-        "coach": {{"engagement_avg": 0.0}},
-        "coachee": {{"engagement_avg": 0.0}}
-    }},
-    "grow_phases": [],
-    "emotional_journey": {{
-        "coach": [],
-        "coachee": []
-    }},
-    "learning_style_analysis": {{}},
-    "key_insights": ["insight1", "insight2"],
-    "coaching_effectiveness": {{
-        "overall": 0.0,
-        "questioning": 0.0,
-        "listening": 0.0
-    }},
-    "recommendations": ["rec1", "rec2"],
-    "transcript_summary": "string"
-}}
-
-Return ONLY valid JSON without any markdown formatting or code blocks."""
-
-        if not self.model:
-            raise RuntimeError("Gemini model not available")
-
-        try:
-            response = await self.model.generate_content_async(prompt)
-            
-            # Parse the JSON response
-            report_dict = self._parse_gemini_json(response.text)
-            
-            # Create SessionReport from parsed dict
-            return SessionReport(
-                session_id=report_dict.get('session_id', session_data.get('session_id', 'unknown')),
-                duration_minutes=report_dict.get('duration_minutes', session_data.get('duration', 0)),
-                participants=report_dict.get('participants', {
-                    "coach": {"engagement_avg": 0.5},
-                    "coachee": {"engagement_avg": 0.5}
-                }),
-                grow_phases=report_dict.get('grow_phases', []),
-                emotional_journey=report_dict.get('emotional_journey', {"coach": [], "coachee": []}),
-                learning_style_analysis=report_dict.get('learning_style_analysis', {}),
-                key_insights=report_dict.get('key_insights', ["Session completed"]),
-                coaching_effectiveness=report_dict.get('coaching_effectiveness', {
-                    "overall": 0.5,
-                    "questioning": 0.5,
-                    "listening": 0.5
-                }),
-                recommendations=report_dict.get('recommendations', ["Continue coaching practices"]),
-                transcript_summary=report_dict.get('transcript_summary', "Session summary unavailable")
-            )
-            
-        except ValueError as e:
-            logger.error(f"Failed to parse Gemini JSON: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Gemini report generation error: {e}")
-            raise
-
-    def _calculate_avg_engagement(self, chunks: list) -> float:
-        """Calculate average engagement from chunks"""
-        if not chunks:
-            return 0.0
-        
-        engagements = [c.get('engagement', 0.5) for c in chunks if isinstance(c, dict)]
-        return sum(engagements) / len(engagements) if engagements else 0.5
-
-    def _format_chunks_for_prompt(self, chunks: list, max_chunks: int = 10) -> str:
-        """Format chunks for inclusion in prompt"""
-        if not chunks:
-            return "No interactions recorded"
-        
-        formatted = []
-        for i, chunk in enumerate(chunks[:max_chunks]):
-            if isinstance(chunk, dict):
-                speaker = chunk.get('speaker', 'unknown')
-                text = chunk.get('transcript', '')
-                formatted.append(f"{i+1}. [{speaker}]: {text[:100]}")
-        
-        return "\n".join(formatted) if formatted else "No interactions recorded"
+        logger.error("Could not parse Gemini JSON. Raw output: %.500s", text)
+        raise ValueError("Could not extract valid JSON from Gemini response")

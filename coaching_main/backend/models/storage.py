@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-from dataclasses import asdict
 from typing import Dict, List
 import uuid  # Add this line at the top
 
@@ -28,8 +27,13 @@ class ChromaDBStorage:
             "session_id": session_id,
             "timestamp": chunk.timestamp,
             "speaker": chunk.speaker,
-            "emotion_primary": max(inferences.emotion.items(), key=lambda x: x[1])[0],
-            "interest_level": inferences.interest_level,
+            # emotion may legitimately be empty ("no signal"); max() on an
+            # empty dict would raise, so record it as unknown instead.
+            "emotion_primary": (
+                max(inferences.emotion.items(), key=lambda x: x[1])[0]
+                if inferences.emotion else "unknown"
+            ),
+            "interest_level": inferences.interest_level or 0.0,
             "grow_phase": feedback.grow_phase.phase,
             "engagement_score": feedback.engagement_score,
         }

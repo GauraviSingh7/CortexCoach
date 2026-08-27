@@ -9,12 +9,10 @@ from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from backend.core.orchestrator import CoachingObserverSystem
-from backend.schemas.data_models import SessionReport
 
 # Load environment variables
 load_dotenv()
@@ -315,12 +313,11 @@ async def get_model_status():
         if not orchestrator:
             raise HTTPException(status_code=500, detail="System not initialized")
         
-        model_status = orchestrator.inference_engine.get_model_status()
-        
-        return {
-            "models": model_status,
-            "all_loaded": all(status == "loaded" for status in model_status.values())
-        }
+        # Returns per-model state ("trained" / "heuristic" / "unavailable")
+        # with the blocking reason attached. The previous version reported
+        # "all_loaded: true" whenever the wrapper classes constructed, which
+        # they always did - even with no weights in memory.
+        return orchestrator.inference_engine.get_model_status()
     
     except Exception as e:
         logger.error(f"Error getting model status: {e}")
