@@ -115,3 +115,28 @@ wording, which makes one speaker look like two and vice versa. Confirmed
 against the installed SDK: `TurnEvent` fields are `type, turn_order,
 turn_is_formatted, end_of_turn, transcript, end_of_turn_confidence, words,
 language_code, language_confidence, speaker_label`.
+
+## ChromaDB
+
+`chromadb==0.4.18` installs cleanly alongside everything else here — it adds
+packages (opentelemetry, kubernetes, posthog, pypika, chroma-hnswlib) but the
+only existing ones it moves are `PyYAML`, `aiohttp` and `aiosignal`, all
+forward and all harmless. `torch`, `transformers`, `tokenizers`, `pydantic`,
+`fastapi` and `streamlit` are untouched.
+
+Two things to know:
+
+- **First stop downloads ~80 MB.** The default embedding function fetches an
+  ONNX MiniLM model to `~/.cache/chroma/onnx_models/`. If that download is
+  interrupted the partial archive is kept and every later write fails with
+  `EOFError: Compressed file ended before the end-of-stream marker`. The fix
+  is to delete `~/.cache/chroma/onnx_models/` and let it download again —
+  stop the backend first, or the file is locked.
+- **Telemetry errors are noise.** 0.4.x calls `posthog.capture()` with an
+  older signature than the version it resolves to, so every client and
+  collection operation logs an ERROR traceback. `anonymized_telemetry=False`
+  is not honoured in 0.4.x, so `storage.py` silences the
+  `chromadb.telemetry` logger outright.
+
+Only the final session report is persisted. `store_session_chunk` and
+`get_session_context` exist in `storage.py` but nothing calls them.

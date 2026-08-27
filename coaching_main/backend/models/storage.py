@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 from typing import Dict, List
 import uuid  # Add this line at the top
@@ -19,9 +20,19 @@ class ChromaDBStorage:
 
     def __init__(self, persist_directory: str = None):
         import chromadb  # noqa: PLC0415 - optional dependency, see docstring
+        from chromadb.config import Settings  # noqa: PLC0415
 
         persist_directory = persist_directory or os.getenv("CHROMADB_PERSIST_DIR", "./.chromadb")
-        self.client = chromadb.PersistentClient(path=persist_directory)
+        # Telemetry off: chromadb 0.4.x calls posthog with an older signature
+        # than the version it resolves to, so every client and collection
+        # operation logs an ERROR traceback that has nothing to do with us.
+        # The setting alone is not honoured in 0.4.x, so silence the logger
+        # too - otherwise a working backend looks like a failing one.
+        logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
+        self.client = chromadb.PersistentClient(
+            path=persist_directory,
+            settings=Settings(anonymized_telemetry=False),
+        )
 
         # Two collections: one for real-time feedback, one for final reports
         self.sessions_collection = self.client.get_or_create_collection("coaching_sessions")
