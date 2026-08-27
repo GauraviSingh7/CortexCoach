@@ -22,13 +22,15 @@ def _reset_session_ui() -> None:
     st.session_state.sarcasm_detected = False
     st.session_state.playback_finished = False
     st.session_state.playback_error = None
+    st.session_state.report_is_stale = False
 
 
 def start_session():
     """Start a new coaching session."""
     try:
         with st.spinner("Starting session..."):
-            data = api.start_session("live")
+            device_index = st.session_state.get("mic_device_index")
+            data = api.start_session("live", device_index=device_index)
             _reset_session_ui()
             st.session_state.session_id = data["session_id"]
             st.session_state.session_active = True
@@ -83,7 +85,18 @@ def stop_session():
             report = api.stop_session()
             st.session_state.session_active = False
             st.session_state.websocket_connected = False
-            st.success("✅ Session stopped successfully")
+            if isinstance(report, dict) and report.get("cached"):
+                # The backend had no live session and replayed the previous
+                # one's report. Showing that as the current result is how a
+                # finished session appears to "come back" on a fresh one.
+                st.session_state.report_is_stale = True
+                st.warning(
+                    "No session was running on the backend - this is the "
+                    "report from the previous session, not a new one."
+                )
+            else:
+                st.session_state.report_is_stale = False
+                st.success("✅ Session stopped successfully")
             return report
     except BackendError as exc:
         st.error(f"❌ Failed to stop session: {exc}")

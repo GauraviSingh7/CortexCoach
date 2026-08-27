@@ -64,12 +64,38 @@ def render_control_panel():
             if status.get("source_finished"):
                 st.session_state.playback_finished = True
 
+            # A live session whose microphone died still reports active.
+            if status.get("capture_error"):
+                st.sidebar.error(
+                    "🎤 Audio capture stopped: " + str(status["capture_error"])
+                )
+            elif status.get("capture_warning"):
+                st.sidebar.warning("🔇 " + str(status["capture_warning"]))
+
         if st.session_state.get("playback_finished"):
             st.sidebar.info(
                 "✅ Playback complete — press **Stop Session** to generate "
                 "the report."
             )
     else:
+        # The backend can still hold a session this browser session has lost
+        # track of - a page reload, a Streamlit restart, or a second tab.
+        # Without this the Stop button stays disabled and every Start fails
+        # with "session already running", which is unrecoverable from the UI.
+        orphan = get_session_status()
+        if orphan and orphan.get("active"):
+            st.sidebar.warning(
+                f"A {orphan.get('session_type') or 'live'} session is already "
+                "running on the backend, started outside this page."
+            )
+            if st.sidebar.button("↩️ Take over / stop it"):
+                st.session_state.session_id = orphan.get("session_id")
+                st.session_state.session_active = True
+                report = stop_session()
+                if report:
+                    st.session_state.final_report = report
+                st.rerun()
+
         try:
             healthy = api.check_health()
             if healthy:
@@ -92,6 +118,25 @@ def render_settings():
             if st.session_state.ws_client.connect():
                 st.success("WebSocket reconnected!")
     
+    with st.sidebar.expander("🎤 Microphone"):
+        devices = api.get_audio_devices()
+        if not devices:
+            st.caption("Backend reported no input devices.")
+        else:
+            labels = ["Auto (best available)"] + [
+                f"[{d['index']}] {d['name'][:40]} @ {d['sample_rate']}Hz"
+                for d in devices
+            ]
+            choice = st.selectbox(
+                "Input device", labels, index=0,
+                help="If nothing is transcribed, the default device is "
+                     "probably returning silence - pick another here.",
+            )
+            st.session_state.mic_device_index = (
+                None if choice == labels[0]
+                else devices[labels.index(choice) - 1]["index"]
+            )
+
     with st.sidebar.expander("🔬 Model Diagnostics"):
         if st.button("Check model status"):
             st.session_state.model_status = api.get_model_status()

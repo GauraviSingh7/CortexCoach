@@ -24,6 +24,12 @@ def render_session_report():
         st.info("Complete a session to generate a report...")
         return
     
+    if st.session_state.get("report_is_stale"):
+        st.warning(
+            "⚠️ This report is from an earlier session - the backend had no "
+            "session running when it was requested."
+        )
+
     report = st.session_state.final_report.get('report', st.session_state.final_report)
     
     st.subheader(f"Session: {report.get('session_id', 'Unknown')}")
