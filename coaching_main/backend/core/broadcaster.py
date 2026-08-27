@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, Set
+from typing import Any, Dict, Optional, Set
 
 from backend.schemas.data_models import AudioChunk, RealTimeFeedback
 
@@ -52,6 +52,20 @@ class FeedbackBroadcaster:
             "speaker_id": chunk.speaker_id,
             "transcript": chunk.transcript,
             "timestamp": chunk.timestamp,
+        })
+
+    async def send_playback_complete(
+        self, turns: int, error: Optional[str] = None
+    ) -> None:
+        """A finite source has no more turns to send.
+
+        The session is still active - stopping it is what produces the
+        report - so this is an announcement, not a lifecycle event.
+        """
+        await self.send({
+            "type": "playback_complete",
+            "turns": turns,
+            "error": error,
         })
 
     async def send_turn(

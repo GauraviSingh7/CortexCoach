@@ -84,6 +84,7 @@ def _detail(response: requests.Response) -> str:
 
 
 def start_session(session_type: str = "live", **kwargs) -> Dict[str, Any]:
+    """Start a session. Extra kwargs (e.g. transcript_path) pass through."""
     response = requests.post(
         f"{API_BASE_URL}/session/start",
         json={"session_type": session_type, **kwargs},

@@ -4,7 +4,12 @@ import streamlit as st
 
 from ui import api
 from ui.api import API_BASE_URL, WS_URL
-from ui.session import get_session_status, start_session, stop_session
+from ui.session import (
+    get_session_status,
+    start_replay_session,
+    start_session,
+    stop_session,
+)
 
 
 def render_header():
@@ -36,6 +41,16 @@ def render_control_panel():
                 st.session_state.final_report = report
             st.rerun()
     
+    st.sidebar.caption(
+        "No API keys? Replay the bundled 40-turn transcript through the "
+        "same analysis pipeline."
+    )
+    if st.sidebar.button(
+        "🔁 Replay sample session", disabled=st.session_state.session_active
+    ):
+        if start_replay_session():
+            st.rerun()
+
     # Session status
     if st.session_state.session_active:
         status = get_session_status()
@@ -43,6 +58,17 @@ def render_control_panel():
             st.sidebar.metric("Chunks Processed", status.get('chunks_processed', 0))
             ws_connected = st.session_state.ws_client.connected if 'ws_client' in st.session_state else False
             st.sidebar.metric("WebSocket", "🟢 Connected" if ws_connected else "🔴 Disconnected")
+
+            # The backend is the authority here: the WebSocket announcement
+            # is missed if the socket dropped, but the status poll is not.
+            if status.get("source_finished"):
+                st.session_state.playback_finished = True
+
+        if st.session_state.get("playback_finished"):
+            st.sidebar.info(
+                "✅ Playback complete — press **Stop Session** to generate "
+                "the report."
+            )
     else:
         try:
             healthy = api.check_health()

@@ -58,6 +58,8 @@ class CoachingObserverSystem:
         self.file_processor = None  # FileAudioProcessor or ReplayProcessor
         self.audio_queue: Optional[asyncio.Queue] = None
         self.processing_task: Optional[asyncio.Task] = None
+        self.source_task: Optional[asyncio.Task] = None
+        self._processing_chunk = False
 
         self.state: Optional[SessionState] = None
         self.session_active = False
@@ -119,6 +121,8 @@ class CoachingObserverSystem:
         self.session_active = True
         self.last_report = None
         self.audio_queue = asyncio.Queue()
+        self.source_task = None
+        self._processing_chunk = False
         self._turn_processor = TurnProcessor(self.inference_engine)
         self._suggestions = SuggestionBuilder(
             self.suggestion_engine, self.gemini_analyzer
@@ -135,9 +139,7 @@ class CoachingObserverSystem:
                     raise ValueError("file_path (transcript) required for replay mode")
                 self.file_processor = ReplayProcessor(file_path, coach_speaker_id)
                 self.processing_task = asyncio.create_task(self._pipeline())
-                asyncio.create_task(
-                    self.file_processor.process_file(file_path, self.audio_queue)
-                )
+                self.source_task = asyncio.create_task(self._drain_source(file_path))
             elif session_type == "file":
                 if not file_path:
                     raise ValueError("file_path required for file mode")
@@ -145,9 +147,7 @@ class CoachingObserverSystem:
                     self.assemblyai_key, coach_speaker_id
                 )
                 self.processing_task = asyncio.create_task(self._pipeline())
-                asyncio.create_task(
-                    self.file_processor.process_file(file_path, self.audio_queue)
-                )
+                self.source_task = asyncio.create_task(self._drain_source(file_path))
             else:
                 self.audio_processor = AudioProcessor(
                     self.assemblyai_key, coach_speaker_id=coach_speaker_id
@@ -174,6 +174,12 @@ class CoachingObserverSystem:
 
         logger.info("Stopping session %s", self.state.session_id)
         self.session_active = False
+
+        # A source stopped mid-playback would otherwise keep pushing turns
+        # into a queue nobody drains.
+        if self.source_task and not self.source_task.done():
+            self.source_task.cancel()
+
         await asyncio.sleep(0.5)
 
         if self.processing_task:
@@ -200,6 +206,46 @@ class CoachingObserverSystem:
 
     # -- pipeline ----------------------------------------------------------
 
+    async def _drain_source(self, file_path: str) -> None:
+        """Feed a finite source, then announce that playback is over.
+
+        Replay and file sessions end; live ones do not. Without this the
+        dashboard keeps polling a session whose input dried up minutes
+        ago, with nothing to mark the last turn as the last. The session
+        deliberately stays active - stopping it is what builds the report
+        - so this only sets :attr:`SessionState.source_finished` and tells
+        the clients.
+        """
+        try:
+            await self.file_processor.process_file(file_path, self.audio_queue)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("Source failed: %s", exc, exc_info=True)
+            if self.state:
+                self.state.source_finished = True
+                await self.broadcaster.send_playback_complete(
+                    turns=self.state.turn_count, error=str(exc)
+                )
+            return
+
+        # The last turn is queued, not analysed. Wait for the pipeline to
+        # catch up so "complete" means the dashboard has everything.
+        while self.session_active and (
+            not self.audio_queue.empty() or self._processing_chunk
+        ):
+            await asyncio.sleep(0.2)
+
+        if not self.session_active or not self.state:
+            return
+
+        self.state.source_finished = True
+        logger.info(
+            "Playback finished after %d turns; session idle until stopped",
+            self.state.turn_count,
+        )
+        await self.broadcaster.send_playback_complete(turns=self.state.turn_count)
+
     async def _pipeline(self) -> None:
         logger.info("Processing pipeline started")
         while self.session_active:
@@ -212,9 +258,12 @@ class CoachingObserverSystem:
                 continue
 
             try:
+                self._processing_chunk = True
                 await self._process_chunk(chunk)
             except Exception as exc:
                 logger.error("Chunk processing error: %s", exc, exc_info=True)
+            finally:
+                self._processing_chunk = False
         logger.info("Processing pipeline stopped")
 
     async def _process_chunk(self, chunk: AudioChunk) -> None:

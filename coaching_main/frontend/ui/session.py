@@ -20,6 +20,8 @@ def _reset_session_ui() -> None:
     st.session_state.current_digression = 0.0
     st.session_state.current_sarcasm = 0.0
     st.session_state.sarcasm_detected = False
+    st.session_state.playback_finished = False
+    st.session_state.playback_error = None
 
 
 def start_session():
@@ -44,6 +46,33 @@ def start_session():
         st.error(
             f"❌ Cannot reach the backend at {API_BASE_URL}. Is it running? ({exc})"
         )
+    return False
+
+
+def start_replay_session(transcript_path: str = "tests/data/sample_session.json"):
+    """Replay a stored transcript through the real analysis pipeline.
+
+    Needs no AssemblyAI or Gemini credentials, so the dashboard can be
+    driven end to end without keys.
+    """
+    try:
+        with st.spinner("Starting replay..."):
+            data = api.start_session("replay", transcript_path=transcript_path)
+            _reset_session_ui()
+            st.session_state.session_id = data["session_id"]
+            st.session_state.session_active = True
+
+            if not st.session_state.ws_client.connected:
+                if st.session_state.ws_client.connect():
+                    time.sleep(1)
+                    st.session_state.websocket_connected = True
+
+            st.success("Replaying the sample session...")
+            return True
+    except BackendError as exc:
+        st.error(f"Could not start replay: {exc}")
+    except Exception as exc:
+        st.error(f"Could not reach the backend at {API_BASE_URL} ({exc})")
     return False
 
 
@@ -77,6 +106,15 @@ def process_real_time_updates():
     for msg in st.session_state.ws_client.get_messages():
         msg_type = msg.get('type', 'final')
         speaker  = msg.get('speaker', 'coach')
+
+        if msg_type == 'playback_complete':
+            # A finite source (replay/file) has fed its last turn. The
+            # session stays active - stopping it is what builds the
+            # report - so this only ends the live streaming state.
+            st.session_state.playback_finished = True
+            st.session_state.playback_error = msg.get('error')
+            st.session_state.current_utterances = {'coach': '', 'coachee': ''}
+            continue
 
         if msg_type == 'partial':
             # Update the live streaming bubble; do NOT add to history

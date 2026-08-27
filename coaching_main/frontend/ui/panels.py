@@ -47,18 +47,20 @@ def render_model_status(status: Optional[Dict[str, Any]]) -> None:
     else:
         st.success(f"All {total} models are running trained weights.")
 
+    # Bordered containers rather than expanders: this panel is rendered
+    # both standalone and inside the report's expander, and Streamlit
+    # refuses to nest an expander within an expander.
     for name, model in (status.get("models") or {}).items():
         icon, label = _STATE_BADGE.get(model.get("state", ""), ("⚪", "Unknown"))
-        with st.expander(f"{icon} {name} — {label}", expanded=False):
-            st.write(model.get("detail") or "-")
+        with st.container(border=True):
+            st.markdown(f"**{icon} {name}** — {label}")
+            st.caption(model.get("detail") or "-")
             if model.get("weights_loaded"):
                 st.caption(f"Weights: `{model['weights_loaded']}`")
             if model.get("blocking_reason"):
-                st.error(f"**Why it is not running:** {model['blocking_reason']}")
+                st.caption(f"**Why it is not running:** {model['blocking_reason']}")
             if model.get("artifacts_missing"):
                 st.caption("Missing: " + ", ".join(model["artifacts_missing"]))
-            if model.get("artifacts_found"):
-                st.caption("Present: " + ", ".join(model["artifacts_found"]))
 
 
 def render_provenance(sources: Dict[str, str]) -> None:

@@ -18,6 +18,12 @@ class SessionState:
     file_path: Optional[str] = None
     start_time: datetime = field(default_factory=datetime.now)
 
+    #: True once a finite source (replay/file) has fed its last turn and
+    #: the pipeline has caught up. Live sessions never set it - a
+    #: microphone has no end. The session stays active either way; only
+    #: an explicit stop builds the report.
+    source_finished: bool = False
+
     chunks: List[AudioChunk] = field(default_factory=list)
     feedback_history: List[RealTimeFeedback] = field(default_factory=list)
     sarcasm_detections: List[Dict[str, Any]] = field(default_factory=list)

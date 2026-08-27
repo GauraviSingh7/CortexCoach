@@ -91,7 +91,23 @@ def render_real_time_feedback():
     st.header("🔄 Real-Time Monitoring Dashboard")
     
     process_real_time_updates()
-    
+
+    if st.session_state.get("playback_finished"):
+        error = st.session_state.get("playback_error")
+        if error:
+            st.error(
+                "⚠️ **Playback stopped early:** " + str(error)
+                + " — press **⏹️ Stop Session** in the sidebar to "
+                "close the session."
+            )
+        else:
+            turns = len(st.session_state.feedback_data)
+            st.success(
+                f"🏁 **Playback complete** — {turns} turns analysed. "
+                "Press **⏹️ Stop Session** in the sidebar to generate the "
+                "report. Live updates have stopped."
+            )
+
     if not st.session_state.feedback_data:
         st.info("⏳ Waiting for session data... Speak into your microphone to see real-time transcription.")
         

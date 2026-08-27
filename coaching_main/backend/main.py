@@ -264,10 +264,16 @@ async def get_session_status():
     if not orchestrator:
         raise HTTPException(status_code=500, detail="System not initialized")
     
+    state = orchestrator.state if orchestrator.session_active else None
+
     return {
         "active": orchestrator.session_active,
         "session_id": orchestrator.session_id if orchestrator.session_active else None,
-        "chunks_processed": len(orchestrator.session_data.get("chunks", [])) if orchestrator.session_active else 0
+        "chunks_processed": len(orchestrator.session_data.get("chunks", [])) if orchestrator.session_active else 0,
+        "session_type": state.session_type if state else None,
+        # Replay/file sources run out; the dashboard uses this to stop
+        # polling and prompt for the report. Always False for live mode.
+        "source_finished": bool(state.source_finished) if state else False,
     }
 
 

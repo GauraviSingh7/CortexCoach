@@ -63,6 +63,12 @@ if 'current_sarcasm' not in st.session_state:
     st.session_state.current_sarcasm = 0.0
 if 'sarcasm_detected' not in st.session_state:
     st.session_state.sarcasm_detected = False
+# Set when a replay/file source runs out, so the 1.5s refresh loop stops
+# instead of re-polling a session that has nothing left to say.
+if 'playback_finished' not in st.session_state:
+    st.session_state.playback_finished = False
+if 'playback_error' not in st.session_state:
+    st.session_state.playback_error = None
 if 'ws_client' not in st.session_state:
     st.session_state.ws_client = WebSocketClient()
 # Transcript architecture: only final turns go into transcript_history;
@@ -87,8 +93,11 @@ def main():
     if st.session_state.session_active:
         render_real_time_feedback()
         
-        # Auto-refresh
-        if st.session_state.get("auto_refresh", True):
+        # Auto-refresh, unless playback has run out
+        if (
+            st.session_state.get("auto_refresh", True)
+            and not st.session_state.playback_finished
+        ):
             time.sleep(1.5)
             st.rerun()
     else:
@@ -114,3 +123,10 @@ def main():
             - **Learning Style Detection**: Identify VAK preferences
             - **AI Suggestions**: Get instant coaching advice
             """)
+
+
+# Streamlit executes this module top to bottom on every rerun, so the
+# entry point is called unconditionally rather than behind an
+# `if __name__ == "__main__"` guard - under the test harness the module
+# is not __main__, and the guard silently rendered an empty page.
+main()
