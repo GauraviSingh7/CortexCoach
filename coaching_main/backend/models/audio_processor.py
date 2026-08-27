@@ -99,6 +99,7 @@ class AudioProcessor:
                     sample_rate=16000,
                     format_turns=True,
                     speaker_labels=True,
+                    max_speakers=2,  # coach + coachee
                     speech_model="universal-streaming-english"
                 )
             )
@@ -374,7 +375,13 @@ class AudioProcessor:
             logger.warning("Audio queue is None, cannot process transcription")
             return
 
-        speaker_id = getattr(event, "speaker_id", None)
+        # streaming.v3 names this `speaker_label`; `speaker_id` never existed
+        # on TurnEvent, so reading it discarded every diarization label and
+        # left role assignment guessing from each utterance's wording alone.
+        speaker_id = (
+            getattr(event, "speaker_label", None)
+            or getattr(event, "speaker_id", None)
+        )
         is_final = bool(getattr(event, "end_of_turn", True))
         duration = getattr(event, "audio_duration_seconds", 2.0)
 

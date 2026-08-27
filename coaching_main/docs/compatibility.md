@@ -87,3 +87,31 @@ persisted and the orchestrator logs `ChromaDB storage unavailable` at
 startup.
 
 There is no virtualenv — packages live in the user/global site-packages.
+
+## System audio is not captured, and cannot be with PyAudio alone
+
+Live capture reads a **microphone**. It hears a video playing on another
+tab only if that audio comes out of the speakers loudly enough for the mic
+to pick up — on headphones it hears nothing at all.
+
+PyAudio exposes no WASAPI loopback, so there is no in-process way to tap
+what the machine is playing. To capture system audio, one of:
+
+- **Enable Stereo Mix** (Windows Sound → Recording → show disabled
+  devices). It then appears in the sidebar's microphone picker like any
+  other input. Present on this machine as device `[24]` but currently
+  disabled.
+- **Install a virtual cable** (VB-CABLE or similar) and route playback
+  through it.
+- **Switch to `PyAudioWPatch`**, a PyAudio fork that does expose WASAPI
+  loopback. Drop-in for the import, but a Windows-only dependency.
+
+## AssemblyAI streaming: the diarization field is `speaker_label`
+
+`streaming.v3.TurnEvent` carries **`speaker_label`**. There is no
+`speaker_id` on it — reading that name returns `None` for every turn, and
+role assignment then silently falls back to guessing from each utterance's
+wording, which makes one speaker look like two and vice versa. Confirmed
+against the installed SDK: `TurnEvent` fields are `type, turn_order,
+turn_is_formatted, end_of_turn, transcript, end_of_turn_confidence, words,
+language_code, language_confidence, speaker_label`.

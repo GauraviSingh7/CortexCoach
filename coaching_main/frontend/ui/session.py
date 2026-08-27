@@ -22,6 +22,7 @@ def _reset_session_ui() -> None:
     st.session_state.sarcasm_detected = False
     st.session_state.playback_finished = False
     st.session_state.playback_error = None
+    st.session_state.report_is_stale = False
 
 
 def start_session():
@@ -84,7 +85,18 @@ def stop_session():
             report = api.stop_session()
             st.session_state.session_active = False
             st.session_state.websocket_connected = False
-            st.success("✅ Session stopped successfully")
+            if isinstance(report, dict) and report.get("cached"):
+                # The backend had no live session and replayed the previous
+                # one's report. Showing that as the current result is how a
+                # finished session appears to "come back" on a fresh one.
+                st.session_state.report_is_stale = True
+                st.warning(
+                    "No session was running on the backend - this is the "
+                    "report from the previous session, not a new one."
+                )
+            else:
+                st.session_state.report_is_stale = False
+                st.success("✅ Session stopped successfully")
             return report
     except BackendError as exc:
         st.error(f"❌ Failed to stop session: {exc}")
