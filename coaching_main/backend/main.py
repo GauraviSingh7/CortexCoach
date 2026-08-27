@@ -121,6 +121,10 @@ async def get_audio_devices():
         devices = orchestrator.get_available_audio_devices()
         return {"devices": devices}
     
+    except HTTPException:
+        # Raised deliberately above - it carries the right status and
+        # message, so it must not be re-wrapped as a 500 below.
+        raise
     except Exception as e:
         logger.error(f"Error getting audio devices: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -134,7 +138,14 @@ async def start_session(request: SessionStartRequest):
             raise HTTPException(status_code=500, detail="System not initialized")
         
         if orchestrator.session_active:
-            raise HTTPException(status_code=400, detail="Session already active")
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "A session is already running "
+                    f"({orchestrator.state.session_type if orchestrator.state else 'live'}). "
+                    "Stop it before starting another."
+                ),
+            )
         
         # Replay mode reads a stored transcript, so it needs no API key.
         if request.session_type != "replay" and not os.getenv("ASSEMBLYAI_API_KEY"):
@@ -161,6 +172,10 @@ async def start_session(request: SessionStartRequest):
         error_msg = str(e)
         logger.error(f"Error starting session: {error_msg}", exc_info=True)
         raise HTTPException(status_code=500, detail=error_msg)
+    except HTTPException:
+        # Raised deliberately above - it carries the right status and
+        # message, so it must not be re-wrapped as a 500 below.
+        raise
     except Exception as e:
         error_msg = f"Unexpected error: {str(e)}"
         logger.error(error_msg, exc_info=True)
@@ -178,7 +193,14 @@ async def start_file_session(
             raise HTTPException(status_code=500, detail="System not initialized")
         
         if orchestrator.session_active:
-            raise HTTPException(status_code=400, detail="Session already active")
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "A session is already running "
+                    f"({orchestrator.state.session_type if orchestrator.state else 'live'}). "
+                    "Stop it before starting another."
+                ),
+            )
         
         # Save uploaded file temporarily
         upload_dir = Path("uploads")
@@ -204,6 +226,10 @@ async def start_file_session(
             "filename": file.filename
         }
     
+    except HTTPException:
+        # Raised deliberately above - it carries the right status and
+        # message, so it must not be re-wrapped as a 500 below.
+        raise
     except Exception as e:
         logger.error(f"Error starting file session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -253,6 +279,10 @@ async def stop_session():
             "report_file": str(report_file)
         }
     
+    except HTTPException:
+        # Raised deliberately above - it carries the right status and
+        # message, so it must not be re-wrapped as a 500 below.
+        raise
     except Exception as e:
         logger.error(f"Error stopping session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -274,6 +304,18 @@ async def get_session_status():
         # Replay/file sources run out; the dashboard uses this to stop
         # polling and prompt for the report. Always False for live mode.
         "source_finished": bool(state.source_finished) if state else False,
+        # A live capture thread that died leaves the session looking healthy
+        # while nothing is recorded. Surface it instead.
+        "capture_warning": (
+            getattr(orchestrator.audio_processor, "capture_warning", None)
+            if orchestrator.session_active and orchestrator.audio_processor
+            else None
+        ),
+        "capture_error": (
+            getattr(orchestrator.audio_processor, "stream_error", None)
+            if orchestrator.session_active and orchestrator.audio_processor
+            else None
+        ),
     }
 
 
@@ -327,6 +369,10 @@ async def get_model_status():
         # they always did - even with no weights in memory.
         return orchestrator.inference_engine.get_model_status()
     
+    except HTTPException:
+        # Raised deliberately above - it carries the right status and
+        # message, so it must not be re-wrapped as a 500 below.
+        raise
     except Exception as e:
         logger.error(f"Error getting model status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
