@@ -1,23 +1,23 @@
-/** Coaching suggestions for the most recent turn. */
+/** Prompts the coach might use next, for the most recent turn. */
 
 import { Card, EmptyState } from "./ui/primitives";
 
 export function Suggestions({ suggestions }: { suggestions: string[] }) {
   return (
-    <Card title="Suggestions" subtitle="For the latest turn">
+    <Card title="What you might try" subtitle="Prompted by the last turn">
       {suggestions.length === 0 ? (
-        <EmptyState>No suggestions yet.</EmptyState>
+        <EmptyState>Nothing to suggest yet.</EmptyState>
       ) : (
-        <ol className="flex flex-col gap-2">
+        <ul className="flex flex-col gap-2.5">
           {suggestions.map((suggestion, index) => (
             <li
               key={index}
-              className="rounded-lg bg-[--color-panel-soft] px-3 py-2 text-sm leading-relaxed"
+              className="border-l-2 border-sage/40 pl-3 text-[14px] leading-relaxed text-ink"
             >
               {suggestion}
             </li>
           ))}
-        </ol>
+        </ul>
       )}
     </Card>
   );

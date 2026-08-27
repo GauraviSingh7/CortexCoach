@@ -1,25 +1,37 @@
-/** Final session report, including GROW coverage and signal provenance. */
+/**
+ * The write-up.
+ *
+ * Set as a document: a readable measure, serif headings, and prose given
+ * room. This is the artefact a coach would actually sit with afterwards,
+ * so it should read like notes rather than a metrics export.
+ */
 
-import type { SessionReport as Report, Source } from "../types";
-import { Badge, Card, EmptyState, Metric, SourceBadge } from "./ui/primitives";
+import type { ModelStatusPayload, SessionReport as Report, Source } from "../types";
+import { Badge, Card, Divider, EmptyState, Metric, SourceBadge } from "./ui/primitives";
 import { metric, percent } from "../lib/format";
 import { ModelStatusPanel } from "./ModelStatusPanel";
-import type { ModelStatusPayload } from "../types";
 
 /** The report carries {} when no status was recorded; narrow it safely. */
 function asModelStatus(value: Report["model_status"]): ModelStatusPayload | null {
   return "models" in value ? (value as ModelStatusPayload) : null;
 }
 
-function ProvenanceLegend({ sources }: { sources: Record<string, Source> }) {
+const PHASE_COLOR: Record<string, string> = {
+  Goal: "#7b96ac",
+  Reality: "#c0925e",
+  Options: "#86a07c",
+  "Way Forward": "#9a8298",
+};
+
+function Provenance({ sources }: { sources: Record<string, Source> }) {
   const entries = Object.entries(sources ?? {});
   if (!entries.length) return null;
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs text-[--color-ink-dim]">
-      <span>Signal provenance:</span>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] text-ink-soft">
+      <span>Where each reading came from:</span>
       {entries.sort().map(([key, source]) => (
-        <span key={key} className="flex items-center gap-1">
-          <span>{key}</span>
+        <span key={key} className="flex items-center gap-1.5">
+          <span>{key.replace(/_/g, " ")}</span>
           <SourceBadge source={source} />
         </span>
       ))}
@@ -30,8 +42,10 @@ function ProvenanceLegend({ sources }: { sources: Record<string, Source> }) {
 export function SessionReport({ report }: { report: Report | null }) {
   if (!report) {
     return (
-      <Card title="Session report">
-        <EmptyState>Complete a session to generate a report.</EmptyState>
+      <Card title="Session notes">
+        <EmptyState>
+          Run a session and the write-up will appear here.
+        </EmptyState>
       </Card>
     );
   }
@@ -46,7 +60,6 @@ export function SessionReport({ report }: { report: Report | null }) {
   const vak = report.learning_style_analysis ?? {};
   const sarcasm = report.sarcasm_summary ?? {};
   const digression = report.digression_summary ?? {};
-  const phaseTotal = report.grow_phases.reduce((s, r) => s + r.percentage, 0);
 
   const download = () => {
     const blob = new Blob([JSON.stringify(report, null, 2)], {
@@ -61,21 +74,27 @@ export function SessionReport({ report }: { report: Report | null }) {
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="mx-auto flex max-w-[860px] flex-col gap-4 pb-8">
       <Card
-        title="Session report"
-        subtitle={`${report.session_id.slice(0, 8)} · ${report.duration_minutes.toFixed(1)} minutes`}
+        title="Session notes"
+        subtitle={`${report.duration_minutes.toFixed(0)} minutes · ${report.session_id.slice(0, 8)}`}
         actions={
           <button
             type="button"
             onClick={download}
-            className="rounded-lg border border-[--color-line] px-3 py-1.5 text-sm hover:bg-[--color-panel-soft]"
+            className="rounded-lg border border-rule bg-card px-3 py-1.5 text-[13px] text-ink-soft transition-colors hover:bg-sink"
           >
             Download JSON
           </button>
         }
       >
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <p className="max-w-[62ch] text-[15px] leading-[1.75] text-ink">
+          {report.transcript_summary}
+        </p>
+
+        <Divider />
+
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
           <Metric label="Overall" value={metric(effectiveness.overall)} />
           <Metric label="Questioning" value={metric(effectiveness.questioning)} />
           <Metric label="Listening" value={metric(effectiveness.listening)} />
@@ -85,38 +104,41 @@ export function SessionReport({ report }: { report: Report | null }) {
           />
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="mt-2.5 grid grid-cols-2 gap-2.5">
           {Object.entries(report.participants ?? {}).map(([role, stats]) => (
             <Metric
               key={role}
-              label={`${role} turns`}
+              label={`${role === "coach" ? "Coach" : "Coachee"} turns`}
               value={stats.total_turns ?? 0}
-              hint={`avg ${Math.round(stats.avg_words ?? 0)} words`}
+              hint={`around ${Math.round(stats.avg_words ?? 0)} words each`}
             />
           ))}
         </div>
       </Card>
 
       <Card
-        title="GROW phases"
-        subtitle={`Shares of classified turns · total ${phaseTotal.toFixed(1)}%`}
+        title="How the session moved"
+        subtitle="Share of the turns spent in each phase"
       >
         {report.grow_phases.length === 0 ? (
-          <EmptyState>No phase data.</EmptyState>
+          <EmptyState>No phase was established.</EmptyState>
         ) : (
-          <ul className="flex flex-col gap-2">
+          <ul className="flex flex-col gap-3.5">
             {report.grow_phases.map((row) => (
               <li key={row.phase}>
-                <div className="mb-1 flex items-center justify-between text-xs">
-                  <span>{row.phase}</span>
-                  <span className="tabular-nums text-[--color-ink-dim]">
-                    {row.percentage.toFixed(1)}% · {row.turns} turns
+                <div className="mb-1.5 flex items-baseline justify-between text-[13px]">
+                  <span className="text-ink">{row.phase}</span>
+                  <span className="tnum text-ink-soft">
+                    {row.percentage.toFixed(0)}% · {row.turns} turns
                   </span>
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-[--color-panel-soft]">
+                <div className="h-1.5 overflow-hidden rounded-full bg-sink">
                   <div
-                    className="h-full rounded-full bg-sky-500"
-                    style={{ width: `${row.percentage}%` }}
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${row.percentage}%`,
+                      backgroundColor: PHASE_COLOR[row.phase] ?? "#a09688",
+                    }}
                   />
                 </div>
               </li>
@@ -125,70 +147,63 @@ export function SessionReport({ report }: { report: Report | null }) {
         )}
 
         {coverage?.coverage_pct !== undefined && (
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <Metric
-              label="Phase coverage"
-              value={`${coverage.coverage_pct.toFixed(0)}%`}
-              hint={`${coverage.classified_turns}/${coverage.total_turns} turns classified`}
-            />
-            <Metric
-              label="Phases reached"
-              value={`${4 - (coverage.phases_missing?.length ?? 0)}/4`}
-              hint={
-                coverage.phases_missing?.length
-                  ? `missing: ${coverage.phases_missing.join(", ")}`
-                  : "all four reached"
-              }
-              tone={coverage.phases_missing?.length ? "warn" : "ok"}
-            />
-          </div>
+          <p className="mt-4 text-[13px] leading-relaxed text-ink-soft">
+            {coverage.classified_turns} of {coverage.total_turns} turns sat
+            within a recognised phase
+            {coverage.phases_missing?.length
+              ? `, and the session did not reach ${coverage.phases_missing.join(" or ")}.`
+              : ", and all four phases were reached."}
+          </p>
         )}
       </Card>
 
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Card title="Conversation signals">
-          <div className="grid grid-cols-2 gap-2">
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card title="What stood out">
+          <div className="grid grid-cols-2 gap-2.5">
             <Metric
               label="Sarcasm"
               value={sarcasm.count_detected ?? 0}
               hint={`of ${sarcasm.total_evaluated ?? 0} turns`}
-              tone={(sarcasm.count_detected ?? 0) > 0 ? "warn" : "neutral"}
+              tone={(sarcasm.count_detected ?? 0) > 0 ? "attention" : "neutral"}
             />
             <Metric
-              label="Off-topic"
+              label="Off topic"
               value={digression.off_topic_moments ?? 0}
               hint={`of ${digression.total_evaluated ?? 0} turns`}
-              tone={(digression.off_topic_moments ?? 0) > 0 ? "warn" : "neutral"}
+              tone={
+                (digression.off_topic_moments ?? 0) > 0 ? "attention" : "neutral"
+              }
             />
           </div>
+
           {(sarcasm.moments?.length ?? 0) > 0 && (
-            <ul className="mt-3 flex flex-col gap-1.5">
+            <ul className="mt-4 flex flex-col gap-3">
               {sarcasm.moments!.map((moment, index) => (
-                <li
-                  key={index}
-                  className="rounded-lg bg-[--color-panel-soft] px-3 py-2 text-xs"
-                >
-                  <div className="mb-1 flex items-center gap-1.5">
-                    <Badge tone={moment.speaker === "coach" ? "coach" : "coachee"}>
+                <li key={index} className="border-l-2 border-clay/40 pl-3">
+                  <div className="mb-1 flex items-center gap-2">
+                    <Badge
+                      tone={moment.speaker === "coach" ? "coach" : "coachee"}
+                    >
                       {moment.speaker}
                     </Badge>
-                    <Badge tone="warn">{moment.type}</Badge>
-                    <span className="tabular-nums text-[--color-ink-dim]">
-                      {moment.score.toFixed(2)}
+                    <span className="text-[12px] text-ink-faint">
+                      {moment.type.replace(/_/g, " ")}
                     </span>
                   </div>
-                  <p className="text-[--color-ink-dim]">{moment.text}</p>
+                  <p className="text-[14px] leading-relaxed text-ink-soft italic">
+                    “{moment.text}”
+                  </p>
                 </li>
               ))}
             </ul>
           )}
         </Card>
 
-        <Card title="Learning style (VAK)">
+        <Card title="How they take things in">
           {Object.keys(vak).length === 0 ? (
-            <EmptyState>Insufficient data.</EmptyState>
+            <EmptyState>Not enough to say.</EmptyState>
           ) : (
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-2.5">
               <Metric label="Visual" value={percent(vak.visual)} />
               <Metric label="Auditory" value={percent(vak.auditory)} />
               <Metric label="Kinesthetic" value={percent(vak.kinesthetic)} />
@@ -197,28 +212,32 @@ export function SessionReport({ report }: { report: Report | null }) {
         </Card>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Card title="Key insights">
-          <ul className="flex list-disc flex-col gap-1.5 pl-4 text-sm leading-relaxed">
-            {report.key_insights.map((insight, index) => (
-              <li key={index}>{insight}</li>
-            ))}
-          </ul>
-        </Card>
-        <Card title="Recommendations">
-          <ul className="flex list-disc flex-col gap-1.5 pl-4 text-sm leading-relaxed">
-            {report.recommendations.map((rec, index) => (
-              <li key={index}>{rec}</li>
-            ))}
-          </ul>
-        </Card>
-      </div>
+      <Card title="What we noticed">
+        <ul className="flex flex-col gap-2.5">
+          {report.key_insights.map((insight, index) => (
+            <li
+              key={index}
+              className="max-w-[62ch] border-l-2 border-rule pl-3 text-[14px] leading-relaxed text-ink"
+            >
+              {insight}
+            </li>
+          ))}
+        </ul>
+      </Card>
 
-      <Card title="Summary">
-        <p className="text-sm leading-relaxed">{report.transcript_summary}</p>
-        <div className="mt-3">
-          <ProvenanceLegend sources={report.analysis_sources} />
-        </div>
+      <Card title="Worth trying next time">
+        <ul className="flex flex-col gap-2.5">
+          {report.recommendations.map((rec, index) => (
+            <li
+              key={index}
+              className="max-w-[62ch] border-l-2 border-sage/40 pl-3 text-[14px] leading-relaxed text-ink"
+            >
+              {rec}
+            </li>
+          ))}
+        </ul>
+        <Divider />
+        <Provenance sources={report.analysis_sources} />
       </Card>
 
       <ModelStatusPanel status={asModelStatus(report.model_status)} />

@@ -1,61 +1,83 @@
 /**
- * Growing transcript of completed turns, plus any in-progress utterance.
+ * The conversation as it unfolds.
+ *
+ * This is the centre of the page and is set to be read, not scanned:
+ * generous line height, a comfortable measure, and the speaker carried by
+ * a quiet rule in the margin rather than a coloured block. Analysis sits
+ * underneath each turn in small type, so it annotates the conversation
+ * instead of competing with it.
  *
  * Turns are appended, never re-rendered wholesale, and the panel only
  * auto-scrolls when the reader is already at the bottom - so reading back
- * through earlier turns is not yanked away by incoming ones. That is the
- * behaviour the Streamlit version could not offer at all, because every
- * update re-ran the whole script and rebuilt the list from scratch.
+ * through earlier turns is not yanked away by incoming ones. The
+ * Streamlit version could not do this at all: every update re-ran the
+ * whole script and rebuilt the list from scratch.
  */
 
 import { memo, useEffect, useRef } from "react";
 import type { FinalMessage, Speaker } from "../types";
-import { Badge, Card, EmptyState, SourceBadge } from "./ui/primitives";
-import { clockTime, dominantEmotion, percent, titleCase } from "../lib/format";
+import { Badge, Card, EmptyState } from "./ui/primitives";
+import { clockTime, dominantEmotion, titleCase } from "../lib/format";
+
+const SPEAKER_RULE: Record<Speaker, string> = {
+  coach: "border-coach/45",
+  coachee: "border-coachee/45",
+};
+
+const SPEAKER_NAME: Record<Speaker, string> = {
+  coach: "text-coach",
+  coachee: "text-coachee",
+};
 
 const Turn = memo(function Turn({ turn }: { turn: FinalMessage }) {
-  const isCoach = turn.speaker === "coach";
   const emotion = dominantEmotion(turn.emotion_trend);
 
   return (
-    <li
-      className="rounded-lg border-l-4 bg-[--color-panel-soft] px-3 py-2.5"
-      style={{
-        borderLeftColor: isCoach ? "var(--color-coach)" : "var(--color-coachee)",
-      }}
-    >
-      <div className="mb-1 flex flex-wrap items-center gap-1.5">
-        <Badge tone={isCoach ? "coach" : "coachee"}>
+    <li className={`border-l-2 pl-4 ${SPEAKER_RULE[turn.speaker]}`}>
+      <div className="flex items-baseline gap-2">
+        <span
+          className={`text-[13px] font-medium ${SPEAKER_NAME[turn.speaker]}`}
+        >
           {titleCase(turn.speaker)}
-        </Badge>
-        <span className="text-[11px] text-[--color-ink-dim]">
+        </span>
+        <span className="tnum text-[12px] text-ink-faint">
           {clockTime(turn.timestamp)}
         </span>
-        <Badge>{turn.grow_phase.phase}</Badge>
-        {emotion ? (
-          <Badge title={`confidence ${percent(emotion.score)}`}>
-            {emotion.label}
-          </Badge>
-        ) : (
-          <Badge title="No emotional signal detected in this turn">
-            no emotion signal
-          </Badge>
-        )}
-        {turn.sarcasm_detected && (
-          <Badge tone="warn" title={`score ${turn.sarcasm_score.toFixed(2)}`}>
-            sarcasm: {turn.sarcasm_type}
-          </Badge>
-        )}
-        {turn.digression_detected && <Badge tone="warn">off-topic</Badge>}
       </div>
 
-      <p className="text-sm leading-relaxed text-[--color-ink]">
+      <p className="mt-1 max-w-[62ch] text-[15px] leading-[1.7] text-ink">
         {turn.transcript}
       </p>
 
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[--color-ink-dim]">
-        <span>engagement {turn.engagement_score.toFixed(2)}</span>
-        <SourceBadge source={turn.sources.emotion} />
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <Badge
+          title={
+            turn.grow_phase.inherited
+              ? `Continuing the ${turn.grow_phase.phase} phase`
+              : turn.grow_phase.reasoning
+          }
+        >
+          {turn.grow_phase.phase}
+        </Badge>
+
+        {emotion ? (
+          <Badge title={`confidence ${emotion.score.toFixed(2)}`}>
+            {emotion.label}
+          </Badge>
+        ) : (
+          <span className="text-[12px] text-ink-faint">no emotional reading</span>
+        )}
+
+        {turn.sarcasm_detected && (
+          <Badge
+            tone="attention"
+            title={`score ${turn.sarcasm_score.toFixed(2)}`}
+          >
+            {turn.sarcasm_type.replace(/_/g, " ")}
+          </Badge>
+        )}
+
+        {turn.digression_detected && <Badge tone="attention">off topic</Badge>}
       </div>
     </li>
   );
@@ -63,16 +85,14 @@ const Turn = memo(function Turn({ turn }: { turn: FinalMessage }) {
 
 function Partial({ speaker, text }: { speaker: Speaker; text: string }) {
   if (!text) return null;
-  const isCoach = speaker === "coach";
   return (
-    <li
-      className="rounded-lg border-l-4 border-dashed bg-[--color-panel-soft]/50 px-3 py-2.5 opacity-70"
-      style={{
-        borderLeftColor: isCoach ? "var(--color-coach)" : "var(--color-coachee)",
-      }}
-    >
-      <Badge tone={isCoach ? "coach" : "coachee"}>{titleCase(speaker)}</Badge>
-      <p className="mt-1 text-sm italic text-[--color-ink-dim]">{text}…</p>
+    <li className={`border-l-2 border-dotted pl-4 ${SPEAKER_RULE[speaker]}`}>
+      <span className={`text-[13px] font-medium ${SPEAKER_NAME[speaker]}`}>
+        {titleCase(speaker)}
+      </span>
+      <p className="mt-1 max-w-[62ch] text-[15px] leading-[1.7] italic text-ink-faint">
+        {text}…
+      </p>
     </li>
   );
 }
@@ -97,15 +117,14 @@ export function LiveTranscript({
   const onScroll = () => {
     const node = scrollRef.current;
     if (!node) return;
-    const distanceFromBottom =
-      node.scrollHeight - node.scrollTop - node.clientHeight;
-    pinnedToBottom.current = distanceFromBottom < 48;
+    pinnedToBottom.current =
+      node.scrollHeight - node.scrollTop - node.clientHeight < 48;
   };
 
   return (
     <Card
-      title="Transcript"
-      subtitle={`${turns.length} completed turns`}
+      title="The conversation"
+      subtitle={`${turns.length} turns so far`}
       className="flex h-full min-h-0 flex-col"
     >
       {turns.length === 0 && !partials.coach && !partials.coachee ? (
@@ -114,9 +133,9 @@ export function LiveTranscript({
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className="scroll-panel min-h-0 flex-1"
+          className="scroll-panel -mr-2 min-h-0 flex-1 pr-2"
         >
-          <ul className="flex flex-col gap-2 pr-1">
+          <ul className="flex flex-col gap-6">
             {turns.map((turn, index) => (
               <Turn key={`${turn.timestamp}-${index}`} turn={turn} />
             ))}

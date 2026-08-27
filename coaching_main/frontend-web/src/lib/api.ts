@@ -54,6 +54,8 @@ export const startSession = (body: {
   session_type?: string;
   device_index?: number | null;
   coach_speaker_id?: string | null;
+  /** Replay mode only: path to a stored transcript on the server. */
+  transcript_path?: string | null;
 }) =>
   request<{ session_id: string; status: string }>("/session/start", {
     method: "POST",

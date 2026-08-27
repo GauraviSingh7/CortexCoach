@@ -69,6 +69,21 @@ export default function App() {
     [dispatch],
   );
 
+  // Runs the real pipeline over a stored transcript - no credentials
+  // needed, and the only way to exercise the dashboard without them.
+  const startReplay = useCallback(async () => {
+    dispatch({ type: "session/starting" });
+    try {
+      const { session_id } = await api.startSession({
+        session_type: "replay",
+        transcript_path: "tests/data/sample_session.json",
+      });
+      dispatch({ type: "session/started", sessionId: session_id });
+    } catch (error) {
+      dispatch({ type: "session/failed", error: (error as Error).message });
+    }
+  }, [dispatch]);
+
   const stop = useCallback(async () => {
     dispatch({ type: "session/starting" });
     try {
@@ -84,8 +99,8 @@ export default function App() {
     <div className="flex h-full flex-col">
       <Header status={state.modelStatus} />
 
-      <main className="flex min-h-0 flex-1 flex-col gap-3 p-4 lg:flex-row">
-        <aside className="flex w-full shrink-0 flex-col gap-3 lg:w-80">
+      <main className="mx-auto flex w-full min-h-0 max-w-[1400px] flex-1 flex-col gap-4 px-7 py-6 lg:flex-row">
+        <aside className="flex w-full shrink-0 flex-col gap-4 lg:w-[21rem]">
           <ControlPanel
             active={state.active}
             busy={state.busy}
@@ -93,18 +108,19 @@ export default function App() {
             connection={connection}
             onStartLive={startLive}
             onStartFile={startFile}
+            onStartReplay={startReplay}
             onStop={stop}
           />
 
           {state.error && (
-            <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-              <div className="flex items-start justify-between gap-2">
+            <div className="rounded-xl border border-brick/25 bg-brick-soft px-4 py-3 text-[14px] leading-relaxed text-ink">
+              <div className="flex items-start justify-between gap-3">
                 <span>{state.error}</span>
                 <button
                   type="button"
                   onClick={() => dispatch({ type: "error/clear" })}
-                  className="text-rose-300 hover:text-rose-100"
-                  aria-label="Dismiss error"
+                  className="shrink-0 text-brick hover:opacity-70"
+                  aria-label="Dismiss"
                 >
                   ×
                 </button>
@@ -116,13 +132,13 @@ export default function App() {
           {!state.active && <ModelStatusPanel status={state.modelStatus} />}
         </aside>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-4">
           {state.active ? (
             <>
               <StatsBanner stats={stats} />
-              <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-2">
+              <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
                 <LiveTranscript turns={state.turns} partials={state.partials} />
-                <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-4">
                   <GrowTimeline turns={state.turns} />
                   <EmotionChart turns={state.turns} />
                 </div>

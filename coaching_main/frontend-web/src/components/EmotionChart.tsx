@@ -1,95 +1,92 @@
 /**
- * Emotional journey over the session.
+ * How the coachee's feeling moved through the session.
  *
- * Turns with no emotional signal are omitted rather than plotted as
- * neutral - the backend returns {} for those on purpose, and drawing a
- * flat neutral line was exactly the artefact the review flagged.
+ * Drawn as a labelled arc rather than a line chart. What matters here is
+ * the *sequence* of named feelings - stuck, then exposed, then relieved -
+ * not a confidence value plotted against time, which was never a
+ * meaningful quantity to graph.
+ *
+ * Turns with no emotional reading are omitted rather than plotted as
+ * neutral: the backend returns nothing for those on purpose, and drawing
+ * a flat neutral line was exactly the artefact the review flagged.
  */
 
 import { useMemo } from "react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import type { FinalMessage } from "../types";
 import { Card, EmptyState, SourceBadge } from "./ui/primitives";
 import { clockTime, dominantEmotion } from "../lib/format";
 
+/**
+ * Feelings grouped by how they sit, so the arc reads at a glance without
+ * needing a legend. Unknown labels fall back to neutral.
+ */
+const TONE: Record<string, string> = {
+  happy: "bg-sage-soft text-sage border-sage/25",
+  excited: "bg-sage-soft text-sage border-sage/25",
+  hopeful: "bg-sage-soft text-sage border-sage/25",
+  relieved: "bg-sage-soft text-sage border-sage/25",
+  sad: "bg-coach-soft text-coach border-coach/25",
+  anxious: "bg-clay-soft text-clay border-clay/25",
+  conflicted: "bg-clay-soft text-clay border-clay/25",
+  frustrated: "bg-brick-soft text-brick border-brick/25",
+};
+
+const NEUTRAL_TONE = "bg-sink text-ink-soft border-rule";
+
 export function EmotionChart({ turns }: { turns: FinalMessage[] }) {
-  const data = useMemo(
+  const points = useMemo(
     () =>
       turns
-        .map((turn, index) => {
+        .map((turn) => {
           const emotion = dominantEmotion(turn.emotion_trend);
           if (!emotion) return null;
           return {
-            index,
-            time: clockTime(turn.timestamp),
             speaker: turn.speaker,
-            emotion: emotion.label,
-            confidence: emotion.score,
+            label: emotion.label,
+            score: emotion.score,
+            time: clockTime(turn.timestamp),
           };
         })
         .filter((point): point is NonNullable<typeof point> => point !== null),
     [turns],
   );
 
-  const source = turns.length ? turns[turns.length - 1].sources.emotion : undefined;
+  const source = turns.length
+    ? turns[turns.length - 1].sources.emotion
+    : undefined;
 
   return (
     <Card
-      title="Emotional journey"
-      subtitle={`${data.length} of ${turns.length} turns carried an emotional signal`}
+      title="How it felt"
+      subtitle={
+        points.length
+          ? `${points.length} of ${turns.length} turns carried a feeling`
+          : undefined
+      }
       actions={<SourceBadge source={source} />}
     >
-      {data.length === 0 ? (
-        <EmptyState>No emotional signal detected yet.</EmptyState>
+      {points.length === 0 ? (
+        <EmptyState>Nothing read as emotionally marked yet.</EmptyState>
       ) : (
-        <div className="h-52">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-              <XAxis
-                dataKey="time"
-                tick={{ fill: "#94a3b8", fontSize: 11 }}
-                axisLine={{ stroke: "#334155" }}
-                tickLine={false}
-              />
-              <YAxis
-                domain={[0, 1]}
-                tick={{ fill: "#94a3b8", fontSize: 11 }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <Tooltip
-                contentStyle={{
-                  background: "#1e293b",
-                  border: "1px solid #334155",
-                  borderRadius: 8,
-                  color: "#e2e8f0",
-                  fontSize: 12,
-                }}
-                formatter={(value: number, _name, entry) => [
-                  `${entry.payload.emotion} (${value.toFixed(2)})`,
-                  entry.payload.speaker,
-                ]}
-              />
-              <Line
-                type="monotone"
-                dataKey="confidence"
-                stroke="#38bdf8"
-                strokeWidth={2}
-                dot={{ r: 3, fill: "#38bdf8" }}
-                activeDot={{ r: 5 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+        <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-2.5">
+          {points.map((point, index) => (
+            <li key={index} className="flex items-center gap-1.5">
+              <span
+                title={`${point.speaker} · ${point.time} · confidence ${point.score.toFixed(2)}`}
+                className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[12px] leading-5 ${
+                  TONE[point.label] ?? NEUTRAL_TONE
+                }`}
+              >
+                {point.label}
+              </span>
+              {index < points.length - 1 && (
+                <span aria-hidden className="text-[12px] text-ink-faint">
+                  →
+                </span>
+              )}
+            </li>
+          ))}
+        </ol>
       )}
     </Card>
   );

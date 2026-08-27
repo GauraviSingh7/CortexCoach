@@ -1,7 +1,7 @@
-/** Session controls: start live or from a file, and stop. */
+/** Starting and ending a session. */
 
 import { useRef, useState } from "react";
-import { Badge, Button, Card } from "./ui/primitives";
+import { Badge, Button, Card, Divider } from "./ui/primitives";
 import type { ConnectionState } from "../lib/ws";
 
 export function ControlPanel({
@@ -11,6 +11,7 @@ export function ControlPanel({
   connection,
   onStartLive,
   onStartFile,
+  onStartReplay,
   onStop,
 }: {
   active: boolean;
@@ -19,6 +20,7 @@ export function ControlPanel({
   connection: ConnectionState;
   onStartLive: (coachSpeakerId: string | null) => void;
   onStartFile: (file: File, coachSpeakerId: string | null) => void;
+  onStartReplay: () => void;
   onStop: () => void;
 }) {
   const [coachSpeaker, setCoachSpeaker] = useState<string>("");
@@ -26,49 +28,67 @@ export function ControlPanel({
 
   const pinned = coachSpeaker.trim() ? coachSpeaker.trim().toUpperCase() : null;
 
-  const connectionTone =
-    connection === "open" ? "ok" : connection === "connecting" ? "warn" : "bad";
+  const connectionLabel =
+    connection === "open"
+      ? "listening"
+      : connection === "connecting"
+        ? "connecting"
+        : "not listening";
 
   return (
     <Card
       title="Session"
-      subtitle={sessionId ? `id ${sessionId.slice(0, 8)}` : "No active session"}
+      subtitle={sessionId ? `${sessionId.slice(0, 8)}` : "Nothing running"}
       actions={
-        <Badge tone={connectionTone}>
-          {connection === "open"
-            ? "live"
-            : connection === "connecting"
-              ? "connecting"
-              : "offline"}
+        <Badge tone={connection === "open" ? "good" : "neutral"}>
+          {connectionLabel}
         </Badge>
       }
     >
-      <div className="flex flex-col gap-3">
-        <label className="flex flex-col gap-1 text-xs text-[--color-ink-dim]">
-          Coach speaker label (optional)
+      <div className="flex flex-col gap-4">
+        <label className="flex flex-col gap-1.5 text-[13px] text-ink-soft">
+          Which speaker is the coach?
           <input
             value={coachSpeaker}
             onChange={(event) => setCoachSpeaker(event.target.value)}
-            placeholder="A or B — leave blank to detect automatically"
+            placeholder="A or B — or leave blank to work it out"
             disabled={active}
-            className="rounded-lg border border-[--color-line] bg-[--color-panel-soft] px-2.5 py-1.5 text-sm text-[--color-ink] placeholder:text-slate-500 disabled:opacity-50"
+            className="rounded-lg border border-rule bg-card px-3 py-2 text-[14px] text-ink outline-none placeholder:text-ink-faint focus:border-sage/50 disabled:opacity-50"
           />
         </label>
 
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => onStartLive(pinned)} disabled={active || busy}>
-            Start live session
+            Start listening
           </Button>
           <Button
-            variant="ghost"
+            variant="quiet"
             onClick={() => fileInput.current?.click()}
             disabled={active || busy}
           >
-            Upload audio file
+            Upload a recording
           </Button>
           <Button variant="danger" onClick={onStop} disabled={!active || busy}>
-            {busy ? "Working…" : "Stop session"}
+            {busy ? "Working…" : "End session"}
           </Button>
+        </div>
+
+        <Divider />
+
+        <div>
+          <p className="text-[13px] leading-relaxed text-ink-soft">
+            No API keys to hand? Replay a stored 40-turn session through the
+            same analysis.
+          </p>
+          <div className="mt-2.5">
+            <Button
+              variant="quiet"
+              onClick={onStartReplay}
+              disabled={active || busy}
+            >
+              Replay a sample session
+            </Button>
+          </div>
         </div>
 
         <input

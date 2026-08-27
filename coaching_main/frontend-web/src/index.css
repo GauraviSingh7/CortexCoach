@@ -1,19 +1,39 @@
 @import "tailwindcss";
 
-/* A monitoring dashboard reads best dark; this commits to one theme so
-   every chart, badge and border is tuned against a known background. */
+/* ---------------------------------------------------------------------
+   Palette: warm paper and stone.
+
+   A coaching session is a reflective, human conversation, so the surface
+   it is reported on should read like a well-set page rather than a
+   monitoring console. Everything is built on a warm off-white; accents
+   are drawn from natural pigments - sage, clay, brick - at low
+   saturation, so nothing in the interface competes with the transcript.
+   --------------------------------------------------------------------- */
 @theme {
-  --color-surface: #0f172a;
-  --color-panel: #1e293b;
-  --color-panel-soft: #263449;
-  --color-line: #334155;
-  --color-ink: #e2e8f0;
-  --color-ink-dim: #94a3b8;
-  --color-coach: #38bdf8;
-  --color-coachee: #c084fc;
-  --color-ok: #4ade80;
-  --color-warn: #fbbf24;
-  --color-bad: #f87171;
+  --color-paper: #f7f5f0;
+  --color-card: #fdfcfa;
+  --color-sink: #f1ede5;
+  --color-rule: #e5dfd4;
+  --color-rule-soft: #efeae1;
+
+  --color-ink: #2e2a26;
+  --color-ink-soft: #6e655b;
+  --color-ink-faint: #a09688;
+
+  --color-sage: #6a8263;
+  --color-sage-soft: #e9eee5;
+  --color-clay: #b0784a;
+  --color-clay-soft: #f6ecdf;
+  --color-brick: #a2584c;
+  --color-brick-soft: #f6e7e3;
+
+  --color-coach: #5b7c99;
+  --color-coach-soft: #e8eef4;
+  --color-coachee: #9d6f68;
+  --color-coachee-soft: #f4e9e6;
+
+  --font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
 html,
@@ -24,22 +44,47 @@ body,
 
 body {
   margin: 0;
-  background: var(--color-surface);
+  background: var(--color-paper);
   color: var(--color-ink);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Keep long transcripts scrolling inside their panel, never the page. */
+/* Headings carry the serif; it does most of the work of making this feel
+   like a considered document rather than a generated readout. */
+h1,
+h2,
+h3 {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+/* Figures line up in columns without the eye having to re-anchor. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
 .scroll-panel {
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: var(--color-line) transparent;
+  scrollbar-color: var(--color-rule) transparent;
 }
 .scroll-panel::-webkit-scrollbar {
-  width: 8px;
+  width: 10px;
 }
 .scroll-panel::-webkit-scrollbar-thumb {
-  background: var(--color-line);
-  border-radius: 4px;
+  background: var(--color-rule);
+  border-radius: 999px;
+  border: 3px solid var(--color-paper);
+}
+
+/* A single, very soft lift. No glows, no layered neon shadows. */
+.lift {
+  box-shadow:
+    0 1px 2px rgb(46 42 38 / 0.04),
+    0 1px 1px rgb(46 42 38 / 0.02);
 }

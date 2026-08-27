@@ -1,4 +1,4 @@
-/** Top row of live session metrics, each labelled with its provenance. */
+/** A quiet summary of where the session currently stands. */
 
 import { Card, Metric, SourceBadge } from "./ui/primitives";
 import { metric, percent } from "../lib/format";
@@ -6,25 +6,23 @@ import type { LiveStats } from "../store/session";
 
 export function StatsBanner({ stats }: { stats: LiveStats }) {
   const engagementTone =
-    stats.engagement >= 0.6 ? "ok" : stats.engagement >= 0.4 ? "warn" : "bad";
+    stats.engagement >= 0.6
+      ? "good"
+      : stats.engagement >= 0.4
+        ? "neutral"
+        : "attention";
 
   return (
     <Card
-      title="Live signals"
-      subtitle={`${stats.turnCount} turns · ${stats.coachTurns} coach / ${stats.coacheeTurns} coachee`}
-      actions={
-        <div className="flex flex-wrap items-center gap-1.5">
-          <SourceBadge source={stats.sources.engagement} />
-        </div>
-      }
+      title="Where the session is"
+      subtitle={`${stats.coachTurns} coach turns · ${stats.coacheeTurns} coachee turns`}
+      actions={<SourceBadge source={stats.sources.engagement} />}
     >
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
         <Metric
-          label="GROW phase"
+          label="Phase"
           value={stats.growPhase}
-          hint={
-            stats.latest?.grow_phase.inherited ? "continuing" : "newly opened"
-          }
+          hint={stats.latest?.grow_phase.inherited ? "continuing" : "just opened"}
         />
         <Metric
           label="Engagement"
@@ -33,21 +31,16 @@ export function StatsBanner({ stats }: { stats: LiveStats }) {
         />
         <Metric label="Learning style" value={stats.learningStyle} />
         <Metric
-          label="Sarcasm"
+          label="Sarcasm noticed"
           value={stats.sarcasmCount}
-          hint="turns flagged"
-          tone={stats.sarcasmCount > 0 ? "warn" : "neutral"}
+          hint={stats.sarcasmCount === 1 ? "moment" : "moments"}
+          tone={stats.sarcasmCount > 0 ? "attention" : "neutral"}
         />
         <Metric
-          label="Off-topic"
+          label="Off topic"
           value={stats.digressionCount}
-          hint="moments"
-          tone={stats.digressionCount > 0 ? "warn" : "neutral"}
-        />
-        <Metric
-          label="Topic drift"
-          value={percent(stats.digression)}
-          hint="current turn"
+          hint={`drift now ${percent(stats.digression)}`}
+          tone={stats.digressionCount > 0 ? "attention" : "neutral"}
         />
       </div>
     </Card>

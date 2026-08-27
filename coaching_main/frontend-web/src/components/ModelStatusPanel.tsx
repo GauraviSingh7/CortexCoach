@@ -1,26 +1,31 @@
 /**
- * Which models are genuinely running, and why the others are not.
+ * What produced these numbers.
  *
  * The Streamlit dashboard had no model diagnostics at all, so a session
  * with three models silently on fallback looked identical to a healthy
- * one. This panel makes that impossible to miss.
+ * one. This panel makes that plain, in ordinary language, without turning
+ * it into an alarm - degraded is a known state here, not a failure.
  */
 
 import { useState } from "react";
-import type { ModelStatusPayload, ModelState } from "../types";
+import type { ModelState, ModelStatusPayload } from "../types";
 import { Badge, Card, EmptyState } from "./ui/primitives";
 
-const STATE_TONE: Record<ModelState, "ok" | "warn" | "bad"> = {
-  trained: "ok",
-  heuristic: "warn",
-  unavailable: "bad",
+const STATE_TONE: Record<ModelState, "good" | "attention" | "neutral"> = {
+  trained: "good",
+  heuristic: "attention",
+  unavailable: "neutral",
 };
 
 const STATE_LABEL: Record<ModelState, string> = {
-  trained: "Trained model",
-  heuristic: "Rule-based heuristic",
-  unavailable: "Not available",
+  trained: "trained model",
+  heuristic: "estimated",
+  unavailable: "unavailable",
 };
+
+/** "vak_inference" reads better as "Vak inference" in a sentence. */
+const humanize = (name: string) =>
+  name.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 
 export function ModelStatusPanel({
   status,
@@ -31,8 +36,8 @@ export function ModelStatusPanel({
 
   if (!status) {
     return (
-      <Card title="Model status">
-        <EmptyState>Model status unavailable — is the backend running?</EmptyState>
+      <Card title="Where the numbers come from">
+        <EmptyState>Can't reach the backend to check.</EmptyState>
       </Card>
     );
   }
@@ -41,58 +46,64 @@ export function ModelStatusPanel({
 
   return (
     <Card
-      title="Model status"
-      subtitle={`${status.trained_count}/${status.total_count} using trained weights`}
+      title="Where the numbers come from"
+      subtitle={
+        degraded.length
+          ? `${degraded.length} of ${status.total_count} signals are estimated`
+          : `All ${status.total_count} models are running trained weights`
+      }
     >
       {degraded.length > 0 && (
-        <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-200">
-          <strong>{degraded.length} model(s) are not using trained weights:</strong>{" "}
-          {degraded.join(", ")}. Metrics from these come from documented
-          rule-based heuristics.
+        <p className="mb-4 rounded-lg border border-clay/20 bg-clay-soft px-3.5 py-3 text-[13px] leading-relaxed text-ink">
+          Some trained models can't be loaded, so those signals come from
+          documented rule-based estimates instead. They're marked
+          <span className="mx-1 inline-flex items-center rounded-md border border-clay/20 bg-clay-soft px-1.5 text-[12px] text-clay">
+            estimated
+          </span>
+          wherever they appear.
         </p>
       )}
 
-      <ul className="flex flex-col gap-1.5">
+      <ul className="flex flex-col divide-y divide-rule-soft">
         {Object.entries(status.models).map(([name, model]) => {
           const open = expanded === name;
           return (
-            <li key={name} className="rounded-lg bg-[--color-panel-soft]">
+            <li key={name}>
               <button
                 type="button"
                 onClick={() => setExpanded(open ? null : name)}
-                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+                className="flex w-full items-center justify-between gap-3 py-2.5 text-left"
               >
-                <span className="text-sm">{name}</span>
-                <span className="flex items-center gap-2">
+                <span className="text-[14px] text-ink">{humanize(name)}</span>
+                <span className="flex shrink-0 items-center gap-2">
                   <Badge tone={STATE_TONE[model.state]}>
                     {STATE_LABEL[model.state]}
                   </Badge>
-                  <span className="text-[--color-ink-dim]">{open ? "−" : "+"}</span>
+                  <span className="text-[13px] text-ink-faint">
+                    {open ? "−" : "+"}
+                  </span>
                 </span>
               </button>
 
               {open && (
-                <div className="border-t border-[--color-line] px-3 py-2 text-xs leading-relaxed text-[--color-ink-dim]">
+                <div className="pb-3.5 text-[13px] leading-relaxed text-ink-soft">
                   <p>{model.detail}</p>
                   {model.weights_loaded && (
-                    <p className="mt-1">
-                      Weights: <code>{model.weights_loaded}</code>
+                    <p className="mt-1.5">
+                      Weights:{" "}
+                      <code className="rounded bg-sink px-1 py-0.5 text-[12px]">
+                        {model.weights_loaded}
+                      </code>
                     </p>
                   )}
                   {model.blocking_reason && (
-                    <p className="mt-2 rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1.5 text-rose-200">
-                      <strong>Why it is not running:</strong>{" "}
+                    <p className="mt-2 border-l-2 border-rule pl-3 text-ink">
                       {model.blocking_reason}
                     </p>
                   )}
                   {model.artifacts_missing.length > 0 && (
-                    <p className="mt-1">
+                    <p className="mt-1.5 text-ink-faint">
                       Missing: {model.artifacts_missing.join(", ")}
-                    </p>
-                  )}
-                  {model.artifacts_found.length > 0 && (
-                    <p className="mt-1">
-                      Present: {model.artifacts_found.join(", ")}
                     </p>
                   )}
                 </div>
