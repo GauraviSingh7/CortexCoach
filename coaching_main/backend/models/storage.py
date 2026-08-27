@@ -4,14 +4,22 @@ import os
 from typing import Dict, List
 import uuid  # Add this line at the top
 
-import chromadb
 from backend.schemas.data_models import AudioChunk, ModelInferences, RealTimeFeedback, SessionReport
 
 
 class ChromaDBStorage:
-    """Handles ChromaDB integration for embeddings and metadata storage"""
+    """Handles ChromaDB integration for embeddings and metadata storage.
+
+    Session persistence is optional: the orchestrator already tolerates a
+    None storage backend. chromadb is therefore imported lazily, inside
+    __init__, so that merely *not having it installed* degrades to
+    "sessions are not persisted" instead of taking down the entire API at
+    import time - which is what a module-level import did.
+    """
 
     def __init__(self, persist_directory: str = None):
+        import chromadb  # noqa: PLC0415 - optional dependency, see docstring
+
         persist_directory = persist_directory or os.getenv("CHROMADB_PERSIST_DIR", "./.chromadb")
         self.client = chromadb.PersistentClient(path=persist_directory)
 

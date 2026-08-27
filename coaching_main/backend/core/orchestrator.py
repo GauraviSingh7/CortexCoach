@@ -24,6 +24,7 @@ from backend.models.contextual_suggestion_engine import ContextualSuggestionEngi
 from backend.models.file_audio_processor import FileAudioProcessor
 from backend.models.gemini_analyzer import GeminiAnalyzer
 from backend.models.inference_engine import ModelInferenceEngine
+from backend.models.replay_processor import ReplayProcessor
 from backend.models.storage import ChromaDBStorage
 from backend.reporting import LocalAnalyzer
 from backend.schemas.data_models import AudioChunk, RealTimeFeedback, SessionReport
@@ -54,7 +55,7 @@ class CoachingObserverSystem:
             self.storage = None
 
         self.audio_processor: Optional[AudioProcessor] = None
-        self.file_processor: Optional[FileAudioProcessor] = None
+        self.file_processor = None  # FileAudioProcessor or ReplayProcessor
         self.audio_queue: Optional[asyncio.Queue] = None
         self.processing_task: Optional[asyncio.Task] = None
 
@@ -127,7 +128,17 @@ class CoachingObserverSystem:
         self._log_degraded_models()
 
         try:
-            if session_type == "file":
+            if session_type == "replay":
+                # Runs the real pipeline over a stored transcript, with no
+                # AssemblyAI or Gemini credentials. See ReplayProcessor.
+                if not file_path:
+                    raise ValueError("file_path (transcript) required for replay mode")
+                self.file_processor = ReplayProcessor(file_path, coach_speaker_id)
+                self.processing_task = asyncio.create_task(self._pipeline())
+                asyncio.create_task(
+                    self.file_processor.process_file(file_path, self.audio_queue)
+                )
+            elif session_type == "file":
                 if not file_path:
                     raise ValueError("file_path required for file mode")
                 self.file_processor = FileAudioProcessor(

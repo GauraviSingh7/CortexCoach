@@ -46,9 +46,10 @@ orchestrator: Optional[CoachingObserverSystem] = None
 
 # Request/Response Models
 class SessionStartRequest(BaseModel):
-    session_type: str = "live"
+    session_type: str = "live"          # "live" | "file" | "replay"
     device_index: Optional[int] = None
-    coach_speaker_id: Optional[str] = None  # For file mode: "A" or "B"
+    coach_speaker_id: Optional[str] = None  # File/replay mode: "A" or "B"
+    transcript_path: Optional[str] = None   # Replay mode only
 
 
 class SessionStartResponse(BaseModel):
@@ -135,8 +136,8 @@ async def start_session(request: SessionStartRequest):
         if orchestrator.session_active:
             raise HTTPException(status_code=400, detail="Session already active")
         
-        # Check for API key
-        if not os.getenv("ASSEMBLYAI_API_KEY"):
+        # Replay mode reads a stored transcript, so it needs no API key.
+        if request.session_type != "replay" and not os.getenv("ASSEMBLYAI_API_KEY"):
             raise HTTPException(
                 status_code=500,
                 detail="ASSEMBLYAI_API_KEY not configured. Please set it in your .env file."
@@ -145,6 +146,7 @@ async def start_session(request: SessionStartRequest):
         session_id = await orchestrator.start_session(
             session_type=request.session_type,
             device_index=request.device_index,
+            file_path=request.transcript_path,
             coach_speaker_id=request.coach_speaker_id
         )
         

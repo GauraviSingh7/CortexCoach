@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+/* A monitoring dashboard reads best dark; this commits to one theme so
+   every chart, badge and border is tuned against a known background. */
+@theme {
+  --color-surface: #0f172a;
+  --color-panel: #1e293b;
+  --color-panel-soft: #263449;
+  --color-line: #334155;
+  --color-ink: #e2e8f0;
+  --color-ink-dim: #94a3b8;
+  --color-coach: #38bdf8;
+  --color-coachee: #c084fc;
+  --color-ok: #4ade80;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Keep long transcripts scrolling inside their panel, never the page. */
+.scroll-panel {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+.scroll-panel::-webkit-scrollbar {
+  width: 8px;
+}
+.scroll-panel::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 4px;
+}
