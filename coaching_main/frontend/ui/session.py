@@ -28,7 +28,8 @@ def start_session():
     """Start a new coaching session."""
     try:
         with st.spinner("Starting session..."):
-            data = api.start_session("live")
+            device_index = st.session_state.get("mic_device_index")
+            data = api.start_session("live", device_index=device_index)
             _reset_session_ui()
             st.session_state.session_id = data["session_id"]
             st.session_state.session_active = True

@@ -112,6 +112,15 @@ def get_session_status() -> Optional[Dict[str, Any]]:
         return None
 
 
+def get_audio_devices() -> List[Dict[str, Any]]:
+    """Input devices the backend can open. Empty list if it cannot say."""
+    try:
+        response = requests.get(f"{API_BASE_URL}/devices/audio", timeout=5)
+        return response.json().get("devices", []) if response.status_code == 200 else []
+    except requests.RequestException:
+        return []
+
+
 def check_health() -> bool:
     """True when the backend answers its health endpoint."""
     try:

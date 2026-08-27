@@ -95,9 +95,9 @@ class CoachingObserverSystem:
     def get_available_audio_devices(self) -> List[Dict[str, Any]]:
         """Input devices for live mode. Empty list if PyAudio is missing."""
         try:
-            from backend.models.audio_capture import AudioCapture
+            from backend.models.audio_capture import AudioCaptureSystem
 
-            return AudioCapture().get_available_devices()
+            return AudioCaptureSystem().get_available_devices()
         except Exception as exc:
             logger.warning("Could not enumerate audio devices: %s", exc)
             return []
