@@ -11,8 +11,12 @@ coaching_main/
 │   ├── models/          # ML models and processors
 │   ├── schemas/         # Data models
 │   └── main.py          # FastAPI application entry point
-├── frontend/            # Streamlit dashboard
-│   └── streamlit_app.py # Main Streamlit application
+├── frontend/            # Streamlit dashboard  <-- the one in use
+│   ├── streamlit_app.py # Entry point
+│   └── ui/              # Views, split out of the single-file app
+├── frontend-web/        # React dashboard (separate, not wired in yet)
+├── tests/               # Regression suite + replay fixture
+├── docs/known-gaps.md   # What is still blocked, and what unblocks it
 ├── models/              # Pre-trained ML models
 │   ├── emotion_recognition/
 │   ├── interest_detection/
@@ -21,6 +25,23 @@ coaching_main/
 ├── requirements.txt     # Python dependencies
 └── README.md           # This file
 ```
+
+## Frontends
+
+**Streamlit (`frontend/`) is the dashboard in use.** Run it as described below.
+
+`frontend-web/` holds a React + Vite + TypeScript dashboard built as an
+alternative. It is kept separate on purpose — nothing in the backend depends on
+it, and it is not part of the normal run instructions. See
+`frontend-web/README.md` if you want to try it.
+
+### Running without API keys
+
+The Streamlit dashboard has a **Replay sample session** button. It runs the real
+analysis pipeline over a stored 40-turn transcript
+(`tests/data/sample_session.json`), so you can exercise the whole system without
+AssemblyAI or Gemini credentials. Everything downstream of the transcript is the
+production code path.
 
 ## 🚀 Quick Start
 
